@@ -28,7 +28,6 @@ class Locator(object):
         self.locator = locator
 
 
-
 class PageScheme(object):
     '''
     Base class for locators collection of a page
@@ -72,12 +71,12 @@ class PageMeta(type):
     Install all locators defined in PageScheme as PageElement.
     PageScheme is found by attribute __scheme__.
     '''
-    
+
     def __new__(cls, name, bases, attrs):
         page_scheme = attrs.get('__scheme__', None)
         if page_scheme:
-        locs = (loc for loc in page_scheme.__dict__.items()
-                if isinstance(loc[1], Locator):
+            locs = (loc for loc in page_scheme.__dict__.items()
+                    if isinstance(loc[1], Locator))
         for loc_name, loc in locs:
             if not loc.by:
                 loc.by = page_scheme._default_by
@@ -126,4 +125,3 @@ class PageObject(object):
         else:
             element.clear()
             element.send_keys(str(value))
-
