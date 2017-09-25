@@ -1,20 +1,9 @@
 
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException
 from importlib import import_module
-import logging
-
-
-page_logger = logging.getLogger('PageObject')
-page_logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('pageobject.log', "w")
-formatter = logging.Formatter('%(name)s: %(message)s')
-fh.setFormatter(formatter)
-page_logger.addHandler(fh)
 
 
 class Locator(object):
@@ -55,7 +44,7 @@ class PageElement(object):
     def __set__(self, instance, value):
         """Setting a PageElement will send keybord input to the element"""
         element = self._find_element(instance.driver)
-        PageObject.set_element(element, value)
+        self.set_element(element, value)
 
     def _find_element(self, driver):
         """Wait element appear and fetch element"""
@@ -63,6 +52,22 @@ class PageElement(object):
             lambda drv: drv.find_element(*self.locator))
         element = driver.find_element(*self.locator)
         return element
+
+    @staticmethod
+    def set_element(element, value):
+        element_type = element.get_attribute('type')
+        if element.tag_name == 'select':
+            sel = Select(element)
+            sel.select_by_visible_text(value)
+        elif element_type == 'checkbox':
+            if element.is_selected() is not value:
+                element.click()
+        elif element_type == 'radio':
+            if value is True:
+                element.click()
+        else:
+            element.clear()
+            element.send_keys(str(value))
 
 
 class PageMeta(type):
@@ -77,10 +82,9 @@ class PageMeta(type):
         if page_scheme:
             locs = (loc for loc in page_scheme.__dict__.items()
                     if isinstance(loc[1], Locator))
-        for loc_name, loc in locs:
-            if not loc.by:
-                loc.by = page_scheme._default_by
-            attrs[loc_name] = PageElement(loc, page_scheme._timeout)
+            for loc_name, loc in locs:
+                loc.by = page_scheme._default_by if not loc.by else loc.by
+                attrs[loc_name] = PageElement(loc, page_scheme._timeout)
         return type.__new__(cls, name, bases, attrs)
 
 
@@ -99,29 +103,13 @@ class PageObject(object):
     def __getattr__(self, name):
         return getattr(self.driver, name)
 
-    def alert(self, timeout=5):
-        WebDriverWait(self.driver, timeout).until(
-            lambda driver: EC.alert_is_present())
-        return self.driver.switch_to.alert
-
     def goto(self, next_page):
         path, cls = next_page.rsplit('.', 1)
         m = import_module(path)
         cls = getattr(m, cls)
         return cls(self.driver)
 
-    @staticmethod
-    def set_element(element, value):
-        element_type = element.get_attribute('type')
-        if element.tag_name == 'select':
-            sel = Select(element)
-            sel.select_by_visible_text(value)
-        elif element_type == 'checkbox':
-            if element.is_selected() is not value:
-                element.click()
-        elif element_type == 'radio':
-            if value is True:
-                element.click()
-        else:
-            element.clear()
-            element.send_keys(str(value))
+    def alert(self, timeout=5):
+        WebDriverWait(self.driver, timeout).until(
+            lambda driver: EC.alert_is_present())
+        return self.driver.switch_to.alert
