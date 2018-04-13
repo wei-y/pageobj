@@ -17,7 +17,7 @@ fh.setFormatter(formatter)
 page_logger.addHandler(fh)
 
 
-class PageScheme(object):
+class PageSchema(object):
     """
     Base class for locators definition
     """
@@ -42,15 +42,15 @@ class PageMeta(type):
     def __new__(cls, name, bases, attrs):
         page_logger.debug('Installing locators to <%s>' % name)
         # __scheme__ refers to the a class inherited from PageScheme
-        page_scheme = attrs.get('__scheme__')
-        if page_scheme:
+        page_schema = attrs.get('__schema__')
+        if page_schema:
             # fetch all Locator defined in the scheme
-            locs = (a for a in page_scheme.__dict__.items() if isinstance(a[1], Locator))
+            locs = (a for a in page_schema.__dict__.items() if isinstance(a[1], Locator))
             for lname, loc in locs:
                 # Use default_by if loc.by is not defined
-                loc.by = page_scheme._default_by if not loc.by else loc.by
+                loc.by = page_schema._default_by if not loc.by else loc.by
                 # Create a PageElement as an attribute in the Page class
-                attrs[lname] = PageElement(loc, page_scheme._timeout)
+                attrs[lname] = PageElement(loc, page_schema._timeout)
                 page_logger.debug('%s...' % lname)
         page_logger.debug('Installation done <%s>' % name)
         return type.__new__(cls, name, bases, attrs)
@@ -202,7 +202,7 @@ class TableColumn(object):
         self.index = index
         if not locator and not fetch:
             # find text by default
-            self.value = lambda e: e.text
+            self.value = lambda e: e.get_attribute('textContent')
         elif not fetch:
             # find the sub element if only locator is supplied
             self.value = TableColumn._sub_elements(locator)
@@ -253,12 +253,6 @@ class TableRow(object):
         return self._data.get(name)
 
     def __str__(self):
-        pretty = {}
-        for k, v in self._data.items():
-            if isinstance(v, WebElement):
-                pretty[k] = '<{0}>{1}</{0}>'.format(v.tag_name, v.text)
-            else:
-                pretty[k] = v
         return str(self._data)
 
 
@@ -283,7 +277,7 @@ class TableBase(object):
             if clmn:
                 value = clmn.value(d)
                 result[clmn.name] = value
-                page_logger.debug('cell %d added: %s' % (i, str(value)))
+                page_logger.debug('cell %d added to %s: %s' % (i, clmn.name, str(value)))
             else:
                 page_logger.debug('cell %d skipped' % i)
         page_logger.debug('Fetching end: %s' % str(result))
@@ -296,15 +290,35 @@ class TableBase(object):
         page_logger.debug('Searching table...')
 
         for k, v in conditions.items():
-            if type(v) is str:
-                conditions[k] = lambda x: v == x
+            if not callable(v):
+                conditions[k] = lambda x, ref=v: x == ref
 
         rows = self.table.find_elements(*self.__row__)  # find all rows
         page_logger.debug('Found %d rows.' % len(rows))
         for row in rows:
             page_logger.debug('Row raw: %s' % row.text)
             data = self._fetch_fields(row)  # find all cells in the row
-            if (not conditions or all(cond(data.get(key)) for (key, cond) in conditions.items())):
+
+            # if not conditions:
+            #     yield TableRow(**data)
+            # else:
+            #     match = True
+            #     for key, cond in conditions.items():
+            #         page_logger.debug('Checking condition %s' % key)
+            #         page_logger.debug('Value in data: %s' % data.get(key))
+            #         if not data.get(key) or not cond(data.get(key)):
+            #             page_logger.debug('Not match.')
+            #             match = False
+            #             break
+            #         page_logger.debug('Match.')
+            #     if match:
+            #         page_logger.debug('Found matching row: %s' % row.text)
+            #         yield TableRow(**data)
+            #         if once:
+            #             page_logger.debug('Terminating immediately after found.')
+            #             break
+
+            if (not conditions or all(data.get(key) and cond(data.get(key)) for (key, cond) in conditions.items())):
                 page_logger.debug('Found matching row: %s' % row.text)
                 yield TableRow(**data)
                 if once:

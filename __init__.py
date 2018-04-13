@@ -1,1 +1,1 @@
-from page_object import PageScheme, Locator, PageObject, TableBase, TableColumn
+from page_object import PageSchema, Locator, PageObject, TableBase, TableColumn
