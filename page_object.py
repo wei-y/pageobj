@@ -202,7 +202,7 @@ class TableColumn(object):
         self.index = index
         if not locator and not fetch:
             # find text by default
-            self.value = lambda e: e.get_attribute('textContent')
+            self.value = lambda e: e.get_attribute('textContent').strip()
         elif not fetch:
             # find the sub element if only locator is supplied
             self.value = TableColumn._sub_elements(locator)
