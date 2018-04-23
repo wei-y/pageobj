@@ -1,32 +1,49 @@
-from page_object import PageObject, PageScheme, Locator
+from page_object import PageObject, PageSchema, Locator
 from selenium import webdriver
-from selenium.webdriver.common.by import By
+import logging
+
+page_logger = logging.getLogger('PageObject')
 
 
-class GoogleScheme(PageScheme):
-    search_box = Locator('lst-ib')
-    search_button = Locator(by=By.CSS_SELECTOR, locator='input[name="btnK"]')
+class TestHomeSchema(PageSchema):
+    sign_in = Locator('Sign in', 'link text')
 
 
-class GooglePage(PageObject):
-    __scheme__ = GoogleScheme
-
-    def search(self, text):
-        self.search_box = text
-        self.search_button.click()
-        return self.goto('test.GoogleResult')
+class TestLoginSchema(PageSchema):
+    user = Locator('email')
+    password = Locator('passwd')
+    login_button = Locator('SubmitLogin')
 
 
-class GoogleResult(PageObject):
-
-    # __scheme__ = GoogleResultScheme
-    # other methods for manipulating data on the result page
-    pass
+class TestMainSchema(PageSchema):
+    menu = Locator('block-top-menu', wrapper=TestMainMenu)
 
 
-drv = webdriver.Firefox()
-drv.get('https://www.google.com')
-page = GooglePage(drv)
-page = page.search('page object')
-page.quit()
-print 'Hello Selenium...'
+class TestHomePage(PageObject):
+    __schema__ = TestHomeSchema
+
+    def to_login(self):
+        self.sign_in.click()
+        return self.goto('test.TestLoginPage')
+
+
+class TestLoginPage(PageObject):
+    __schema__ = TestLoginSchema
+
+    def login(self, user, password):
+        self.user = user
+        self.password = password
+        self.login_button.click()
+        return self.goto('test.TestMainPage')
+
+
+class TestMainPage(PageObject):
+    __schema__ = TestMainSchema
+
+
+if __name__ == '__main__':
+    drv = webdriver.Firefox()
+    drv.get('http://automationpractice.com/')
+    page = TestHomePage(drv)
+    page = page.to_login()
+    page = page.login('yyloginbin@gmail.com', '12345')

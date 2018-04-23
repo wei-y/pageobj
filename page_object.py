@@ -1,10 +1,8 @@
 
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.remote.webelement import WebElement
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import WebDriverException
 from importlib import import_module
 import logging
 
@@ -28,9 +26,10 @@ class PageSchema(object):
 
 class Locator(object):
 
-    def __init__(self, locator, by=None):
+    def __init__(self, locator, by=None, wrapper=None):
         self.by = by
         self.locator = locator
+        self.wrapper = wrapper
 
 
 class PageMeta(type):
@@ -101,10 +100,6 @@ class PageObject(object):
         cls = getattr(m, cls)
         return cls(self.driver)
 
-    def frame(self, name):
-        # TODO: handling frames
-        pass
-
     @staticmethod
     def set_element(element, value):
         """
@@ -143,13 +138,17 @@ class PageElement(object):
 
     def __init__(self, loc, timeout=30):
         self.locator = loc.by, loc.locator
+        self.wrapper = loc.wrapper
         self.timeout = timeout
 
     def __get__(self, instance, owner):
         """Getting a PageElement will return the element"""
         page_logger.debug('Accessing page element {}'.format(self.locator))
         try:
-            return self._find_element(instance.driver)
+            e = self._find_element(instance.driver)
+            if self.wrapper is not None:
+                e = self.wrapper(e)
+            return e
         except Exception:
             page_logger.debug('Cannot find the element')
             return None
@@ -192,53 +191,21 @@ class TableColumn(object):
     """
     Define a table column.
     index - the index of the cells find by the locator of Table.__cell__, start from 0
-    locator - further locator based on the cell grabbed by index
-    fetch - a callback used to grab information from the element located by index and/or locator
+    wrapper - a callable used to cook data from the element located by index
     """
 
-    def __init__(self, index, locator=None, fetch=None):
-
+    def __init__(self, index, wrapper=None):
         self.name = ''
         self.index = index
-        if not locator and not fetch:
-            # find text by default
-            self.value = lambda e: e.get_attribute('textContent').strip()
-        elif not fetch:
-            # find the sub element if only locator is supplied
-            self.value = TableColumn._sub_elements(locator)
-        elif not locator:
-            # find cell content if only fetch is supplied
-            self.value = TableColumn._cell_content(fetch)
+        self.wrapper = wrapper
+
+    def fetch(self, e):
+        page_logger.debug('Fetching cell from row...')
+        if self.wrapper is not None:
+            page_logger.debug('Wrapping table cell...')
+            return self.wrapper(e)
         else:
-            # find refined information if both locator and fetch are supplied
-            self.value = TableColumn._sub_content(locator, fetch)
-
-    @staticmethod
-    def _sub_elements(locator):
-        def _fetch(e):
-            try:
-                return e.find_elements(*locator)
-            except WebDriverException:
-                return None
-        return _fetch
-
-    @staticmethod
-    def _sub_content(locator, fetch):
-        def _fetch(e):
-            try:
-                return fetch(e, *locator)
-            except WebDriverException:
-                return None
-        return _fetch
-
-    @staticmethod
-    def _cell_content(fetch):
-        def _fetch(e):
-            try:
-                return fetch(e)
-            except WebDriverException:
-                return None
-        return _fetch
+            return e
 
 
 class TableRow(object):
@@ -246,14 +213,36 @@ class TableRow(object):
     A row in the table located by Table.__row__
     """
 
-    def __init__(self, **kargs):
-        self._data = kargs
+    def __init__(self, element, cell_loc, clmn_spec):
+        self.element = element
+        self.cell_loc = cell_loc
+        self.clmn_spec = clmn_spec
 
     def __getattr__(self, name):
-        return self._data.get(name)
+        page_logger.debug('Getting cell by name: %s' % name)
+        cells = self.element.find_elements(*self.cell_loc)
+        page_logger.debug('%d cells located' % len(cells))
+        for i, c in enumerate(cells):
+            if self.clmn_spec[i].name == name:
+                return self.clmn_spec[i].fetch(c)
+        page_logger.debug('Not found.')
+        return None
+
+    def __getitem__(self, index):
+        page_logger.debug('Getting cell by index: %d' % index)
+        if index in self.clmn_spec:
+            cells = self.element.find_elements(*self.cell_loc)
+            page_logger.debug('%d cells located' % len(cells))
+            return self.clmn_spec[index].fetch(cells[index])
+        page_logger.debug('Not found')
+        return None
 
     def __str__(self):
-        return str(self._data)
+        cells = self.element.find_elements(*self.cell_loc)
+        text = []
+        for i, c in self.clmn_spec.items():
+            text.append(str(self.clmn_spec[i].fetch(cells[i])))
+        return ' | '.join(text)
 
 
 class TableBase(object):
@@ -268,69 +257,49 @@ class TableBase(object):
         page_logger.debug('Table created.')
         self.table = table
 
-    def _fetch_fields(self, row):
-        page_logger.debug('Fetching data from table row...')
-        result = {}
-        cells = row.find_elements(*self.__cell__)
-        for (i, d) in enumerate(cells):
-            clmn = self._columns.get(i)
-            if clmn:
-                value = clmn.value(d)
-                result[clmn.name] = value
-                page_logger.debug('cell %d added to %s: %s' % (i, clmn.name, str(value)))
-            else:
-                page_logger.debug('cell %d skipped' % i)
-        page_logger.debug('Fetching end: %s' % str(result))
-        return result
+    def __getitem__(self, index):
+        page_logger.debug('Getting row %d' % index)
+        rows = self.table.find_elements(*self.__row__)
+        return TableRow(rows[index], self.__cell__, self._columns)
+
+    def __len__(self):
+        return len(self.table.find_elements(*self.__row__))
 
     def search(self, once=False, **conditions):
         """
         A Generator yielding all matching rows
         """
         page_logger.debug('Searching table...')
-
         for k, v in conditions.items():
             if not callable(v):
-                conditions[k] = lambda x, ref=v: x == ref
+                conditions[k] = lambda x, ref=v: x.get_attribute('contentText') == ref
 
-        rows = self.table.find_elements(*self.__row__)  # find all rows
-        page_logger.debug('Found %d rows.' % len(rows))
-        for row in rows:
-            page_logger.debug('Row raw: %s' % row.text)
-            data = self._fetch_fields(row)  # find all cells in the row
+        for i in range(len(self)):
+            page_logger.debug('Checking row %d...' % i)
+            if not conditions:
+                page_logger.debug('No conditions supplied. Match.')
+                yield self[i]
 
-            # if not conditions:
-            #     yield TableRow(**data)
-            # else:
-            #     match = True
-            #     for key, cond in conditions.items():
-            #         page_logger.debug('Checking condition %s' % key)
-            #         page_logger.debug('Value in data: %s' % data.get(key))
-            #         if not data.get(key) or not cond(data.get(key)):
-            #             page_logger.debug('Not match.')
-            #             match = False
-            #             break
-            #         page_logger.debug('Match.')
-            #     if match:
-            #         page_logger.debug('Found matching row: %s' % row.text)
-            #         yield TableRow(**data)
-            #         if once:
-            #             page_logger.debug('Terminating immediately after found.')
-            #             break
-
-            if (not conditions or all(data.get(key) and cond(data.get(key)) for (key, cond) in conditions.items())):
-                page_logger.debug('Found matching row: %s' % row.text)
-                yield TableRow(**data)
+            if all((getattr(self[i], name) is not None and
+                    condition(getattr(self[i], name))
+                   for name, condition in conditions.items())):
+                page_logger.debug('Found matching row: %d' % i)
+                yield self[i]
                 if once:
                     page_logger.debug('Terminating immediately after found.')
                     break
 
-    def __getitem__(self, index):
-        page_logger.debug('Getting row {}...'.format(index))
-        rows = self.table.find_elements(*self.__row__)  # find all rows
-        page_logger.debug('Found %d rows.' % len(rows))
-        if index >= len(rows) or index < -len(rows):
-            return None
-        else:
-            data = self._fetch_fields(rows[index])
-            return TableRow(**data)
+            # match = True
+            # for name, condition in conditions.items():
+            #     page_logger.debug('Checking %s...' % name)
+            #     e = getattr(self[i], name)
+            #     if e is None or not condition(e):
+            #         page_logger.debug('Failed')
+            #         match = False
+            #         break
+            # if match:
+            #     page_logger.debug('Found matching row: %d' % i)
+            #     yield self[i]
+            #     if once:
+            #         page_logger.debug('Terminating immediately after found.')
+            #         break
