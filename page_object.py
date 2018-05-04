@@ -15,44 +15,78 @@ fh.setFormatter(formatter)
 page_logger.addHandler(fh)
 
 
-class PageSchema(object):
+class PageElement(object):
     """
-    Base class for locators definition
+    PageElement are used inside a PageObject to define elements on the page.
     """
 
-    _default_by = By.ID
-    _timeout = 30
-
-
-class Locator(object):
-
-    def __init__(self, locator, by=None, wrapper=None):
+    def __init__(self, loc, by=By.ID, wrapper=None, timeout=30):
+        self.locator = loc
         self.by = by
-        self.locator = locator
         self.wrapper = wrapper
+        self.timeout = timeout
+
+    def __get__(self, instance, owner):
+        """Getting a PageElement will return the element"""
+        page_logger.debug('Accessing page element {}'.format(self.locator))
+        try:
+            e = self._find_element(instance.driver)
+            if self.wrapper is not None:
+                e = self.wrapper(e)
+            return e
+        except Exception as ex:
+            page_logger.debug('Cannot find the element')
+            page_logger.debug(str(ex))
+            return None
+
+    def __set__(self, instance, value):
+        """Setting a PageElement will send keybord input to the element"""
+        page_logger.debug('Setting page element')
+        element = self._find_element(instance.driver)
+        self._set_element(element, value)
+
+    def _find_element(self, driver):
+        """Wait element appear and fetch element"""
+        loc = self.by, self.locator
+        WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
+        element = driver.find_element(*loc)
+        page_logger.debug('Element found: %s' % self.locator)
+        return element
+
+    @staticmethod
+    def _select(element, value):
+        page_logger.debug('Changing element to Select')
+        element = Select(element)
+        page_logger.debug('Selecting %s' % value)
+        element.select_by_visible_text(value)
+
+    @staticmethod
+    def _checkbox(element, value):
+        if element.is_selected() is not value:
+            page_logger.debug('Clicking checkbox...')
+            element.click()
+
+    @staticmethod
+    def _radio(element, value):
+        page_logger.debug('Clicking radio button...')
+        if value:
+            element.click()
+
+    @staticmethod
+    def _input(element, value):
+        page_logger.debug('Entering %s' % value)
+        element.clear()
+        element.send_keys(str(value))
+
+    def _set_element(self, element, value):
+        element_type = element.get_attribute('type')
+        getattr(self, '_' + element_type, self._input)(element, value)
 
 
-class PageMeta(type):
-    """
-    Meta class for the PageObject.
-    This class will load the configuration in __scheme__ to be Page Element.
-    """
+class PageComponent(object):
 
-    def __new__(cls, name, bases, attrs):
-        page_logger.debug('Installing locators to <%s>' % name)
-        # __scheme__ refers to the a class inherited from PageScheme
-        page_schema = attrs.get('__schema__')
-        if page_schema:
-            # fetch all Locator defined in the scheme
-            locs = (a for a in page_schema.__dict__.items() if isinstance(a[1], Locator))
-            for lname, loc in locs:
-                # Use default_by if loc.by is not defined
-                loc.by = page_schema._default_by if not loc.by else loc.by
-                # Create a PageElement as an attribute in the Page class
-                attrs[lname] = PageElement(loc, page_schema._timeout)
-                page_logger.debug('%s...' % lname)
-        page_logger.debug('Installation done <%s>' % name)
-        return type.__new__(cls, name, bases, attrs)
+    def __init__(self, element):
+        self.driver = element
 
 
 class PageObject(object):
@@ -62,7 +96,6 @@ class PageObject(object):
     be delegated to the webdriver.
     """
 
-    __metaclass__ = PageMeta
     wait_ajax_script = {
         'JQUERY': 'return jQuery.active == 0;',
         'ASP.NET': 'return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack() == false;'
@@ -99,72 +132,6 @@ class PageObject(object):
         m = import_module(path)
         cls = getattr(m, cls)
         return cls(self.driver)
-
-    @staticmethod
-    def set_element(element, value):
-        """
-        Set value directly to element:
-        select: choose option of the value
-        checkbox: tick/untick according to value
-        radio: select if value is True
-        other: assume text, clear and input value as string
-        """
-        element_type = element.get_attribute('type')
-        if element.tag_name == 'select':
-            # Select element needs to be converted to Select object
-            page_logger.debug('Changing element to Select')
-            element = Select(element)
-            page_logger.debug('Selecting %s' % value)
-            element.select_by_visible_text(value)
-        elif element_type == 'checkbox':
-            # Checkbox element accepts Boolean value and only change when needed
-            if element.is_selected() is not value:
-                element.click()
-        elif element_type == 'radio':
-            # Radio element accepts Boolean True only
-            if value is True:
-                element.click()
-        else:
-            # All other elements are treated as input/text
-            page_logger.debug('Entering %s' % value)
-            element.clear()
-            element.send_keys(str(value))
-
-
-class PageElement(object):
-    """
-    PageElement are used inside a PageObject to define elements on the page.
-    """
-
-    def __init__(self, loc, timeout=30):
-        self.locator = loc.by, loc.locator
-        self.wrapper = loc.wrapper
-        self.timeout = timeout
-
-    def __get__(self, instance, owner):
-        """Getting a PageElement will return the element"""
-        page_logger.debug('Accessing page element {}'.format(self.locator))
-        try:
-            e = self._find_element(instance.driver)
-            if self.wrapper is not None:
-                e = self.wrapper(e)
-            return e
-        except Exception:
-            page_logger.debug('Cannot find the element')
-            return None
-
-    def __set__(self, instance, value):
-        """Setting a PageElement will send keybord input to the element"""
-        page_logger.debug('Setting page element')
-        element = self._find_element(instance.driver)
-        PageObject.set_element(element, value)
-
-    def _find_element(self, driver):
-        """Wait element appear and fetch element"""
-        WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(self.locator))
-        element = driver.find_element(*self.locator)
-        page_logger.debug('Element found: %s' % self.locator[1])
-        return element
 
 
 class TableMeta(type):
