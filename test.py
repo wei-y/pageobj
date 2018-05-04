@@ -42,7 +42,8 @@ class AccountPage(PageObject):
     account_menu = PageElement('center_column', wrapper=AccountMenu)
 
     def goto(self, name):
-        return self.account_menu.click(name)
+        target = self.account_menu.click(name)
+        return self.goto(target)
 
 
 class HistoryPage(PageObject):

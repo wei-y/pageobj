@@ -87,6 +87,7 @@ class PageComponent(object):
 
     def __init__(self, element):
         self.driver = element
+        self.page = PageObject(element._parent)
 
 
 class PageObject(object):
