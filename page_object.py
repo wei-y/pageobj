@@ -119,10 +119,13 @@ class PageObject(object):
         WebDriverWait(self.context, timeout).until(EC.alert_is_present())
         return self.context.switch_to.alert
 
-    def window(self, index):
+    def window(self, index, timeout=30):
+        script = 'return document.readyState == "complete"'
         page_logger.debug('Switching to window[{}].'.format(index))
         handle = self.context.window_handles[index]
         self.context.switch_to.window(handle)
+        WebDriverWait(self.context, timeout).until(
+            lambda driver: driver.execute_script(script))
         return self
 
     def wait_ajax(self, lib='JQUERY', timeout=30):
@@ -184,6 +187,7 @@ class PageTable(PageComponent):
             if result and once:
                 page_logger.debug('Terminating immediately after found.')
                 return result[0]
+
         page_logger.debug('Found {} rows'.format(len(result)))
         if once and not result:
             return None
