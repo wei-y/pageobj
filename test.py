@@ -25,7 +25,6 @@ class PageNavigator(PageComponent):
     bookings = PageElement('Bookings', by='link text')
 
     _links = {
-        'frontend': 'test.FrontendPage',
         'bookings': 'test.BookingsPage'
     }
 
@@ -44,10 +43,6 @@ class DashboardPage(BasePage):
     pass
 
 
-class FrontendPage(BasePage):
-    pass
-
-
 class BookingRow(PageComponent):
     tick = PageElement('td:nth-child(1) input[type="checkbox"]', by='css selector')
     number = PageElement('td:nth-child(2)', by='css selector')
@@ -59,24 +54,25 @@ class BookingRow(PageComponent):
     total = PageElement('td:nth-child(8)', by='css selector')
     paid = PageElement('td:nth-child(9)', by='css selector')
     remaining = PageElement('td:nth-child(10)', by='css selector')
-    status_button = PageElement('td:nth-child(11)', by='css selector')
-    view_button = PageElement('td:nth-child(12) a', by='css selector')
-    edit_button = PageElement('td:nth-child(13) a', by='css selector')
-    delete_button = PageElement('td:nth-child(14) a', by='css selector')
+    status = PageElement('td:nth-child(11)', by='css selector')
+    view_button = PageElement('td:nth-child(12) a:nth-child(1)', by='css selector')
+    edit_button = PageElement('td:nth-child(12) a:nth-child(2)', by='css selector')
+    delete_button = PageElement('td:nth-child(12) a:nth-child(3)', by='css selector')
 
     def view(self):
         self.view_button.click()
-        self.page.wait_ajax()
+        self.pageobj.wait_ajax()
         return 'test.BasePage'
 
     def edit(self):
         self.edit_button.click()
-        self.page.wait_ajax()
+        self.pageobj.wait_ajax()
         return 'test.BasePage'
 
     def delete(self):
         self.delete_button.click()
-        self.page.wait_ajax()
+        self.pageobj.wait_ajax()
+        self.pageobj.alert().accept()
 
 
 class BookingTable(PageTable):
@@ -96,5 +92,8 @@ if __name__ == '__main__':
     page = TestLoginPage(drv)
     page = page.login('admin@phptravels.com', 'demoadmin')
     page = page.nav_to('bookings')
-    row = list(page.booking_table.query(reference='1248', once=True))[0]
-    row.delete()
+    page.save_screenshot('test1.png')
+    page.booking_table[0].view()
+    page.window(-1).save_screenshot('test2.png')
+    page.window(-1).close()
+    page = page.window(0)

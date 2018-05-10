@@ -50,14 +50,14 @@ class PageElement(object):
         loc = self.by, self.locator
         WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
         element = driver.find_element(*loc)
-        page_logger.debug('Element found: %s' % self.locator)
+        page_logger.debug('Element found: {}'.format(self.locator))
         return element
 
     @staticmethod
     def _select(element, value):
         page_logger.debug('Changing element to Select')
         element = Select(element)
-        page_logger.debug('Selecting %s' % value)
+        page_logger.debug('Selecting {}'.format(value))
         element.select_by_visible_text(value)
 
     @staticmethod
@@ -74,7 +74,7 @@ class PageElement(object):
 
     @staticmethod
     def _input(element, value):
-        page_logger.debug('Entering %s' % value)
+        page_logger.debug('Entering {}'.format(value))
         element.clear()
         element.send_keys(str(value))
 
@@ -87,7 +87,7 @@ class PageComponent(object):
 
     def __init__(self, element):
         self.context = element
-        self.page = PageObject(element._parent)
+        self.pageobj = PageObject(element._parent)
 
     def __getattr__(self, name):
         # delegate to unresolvables webdriver
@@ -119,9 +119,15 @@ class PageObject(object):
         WebDriverWait(self.context, timeout).until(EC.alert_is_present())
         return self.context.switch_to.alert
 
+    def window(self, index):
+        page_logger.debug('Switching to window[{}].'.format(index))
+        handle = self.context.window_handles[index]
+        self.context.switch_to.window(handle)
+        return self
+
     def wait_ajax(self, lib='JQUERY', timeout=30):
         """Run AJAX call and wait for returning"""
-        page_logger.debug('Waiting for AJAX using %s' % lib)
+        page_logger.debug('Waiting for AJAX using {}'.format(lib))
         js = self.wait_ajax_script.get(lib, 'return true;')
         WebDriverWait(self.context, timeout).until(
             lambda driver: driver.execute_script(js))
@@ -132,7 +138,7 @@ class PageObject(object):
         next_page - the full path to the page defined in a globally visible module.
         The reason for using a string instead of a class is to avoid circular importing
         """
-        page_logger.debug('Changing page to <%s>' % next_page)
+        page_logger.debug('Changing page to <{}>'.format(next_page))
         path, cls = next_page.rsplit('.', 1)
         m = import_module(path)
         cls = getattr(m, cls)
@@ -146,7 +152,7 @@ class PageTable(PageComponent):
 
     def __getitem__(self, index):
         row = self._all_rows()[index]
-        return self.__row__['component'](row)
+        return self.__row_component__(row)
 
     def __len__(self):
         return len(self._all_rows())
@@ -157,28 +163,29 @@ class PageTable(PageComponent):
     def query(self, once=False, **conditions):
         page_logger.debug('Querying table...')
         rows = self._all_rows()
+        result = []
 
         for k, v in conditions.items():
             if not callable(v):
-                conditions[k] = lambda x, ref=v: x.get_attribute('contentText') == ref
+                conditions[k] = lambda x, ref=v: x.get_attribute('textContent') == ref
 
         for i, row in enumerate(rows):
-            page_logger.debug('Checking row %d...' % i)
+            page_logger.debug('Checking row {}...'.format(i))
 
             if self.__row_component__:
                 row = self.__row_component__(row)
 
-            for a, c in conditions.items():
-                page_logger.debug(getattr(row, a).get_attribute('contentText'))
-
-            match = not conditions or all(cond(getattr(row, attr)) for (attr, cond) in conditions.items())
-
-            if match:
-                page_logger.debug('Found matching row: %d' % i)
-                yield row
+            if not conditions or all(cond(getattr(row, attr)) for (attr, cond) in conditions.items()):
+                page_logger.debug('Found matching row: {}'.format(i))
+                result.append(row)
             else:
                 page_logger.debug('No match.')
 
-            if match and once:
+            if result and once:
                 page_logger.debug('Terminating immediately after found.')
-                break
+                return result[0]
+        page_logger.debug('Found {} rows'.format(len(result)))
+        if once and not result:
+            return None
+        else:
+            return result
