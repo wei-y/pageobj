@@ -1,14 +1,14 @@
 from page_object import PageObject, PageElement, PageComponent, PageTable
 from selenium import webdriver
-import logging
-
-page_logger = logging.getLogger('PageObject')
+from selenium.webdriver.common.by import By
 
 
 class TestLoginPage(PageObject):
-    user = PageElement('input[name="email"]', by='css selector')
-    password = PageElement('input[name="password"]', by='css selector')
-    login_button = PageElement('button[type="submit"]', by='css selector')
+    __default_by__ = By.CSS_SELECTOR
+
+    user = PageElement('input[name="email"]')
+    password = PageElement('input[name="password"]')
+    login_button = PageElement('button[type="submit"]')
 
     def login(self, user, password):
         self.user = user
@@ -18,11 +18,13 @@ class TestLoginPage(PageObject):
 
 
 class PageNavigator(PageComponent):
-    home = PageElement('DASHBOARD', by='link text')
-    frontend = PageElement('Frontend', by='link text')
-    configuration = PageElement('Configuration', by='link text')
-    settings = PageElement('Settings', by='link text')
-    bookings = PageElement('Bookings', by='link text')
+    __default_by__ = By.LINK_TEXT
+
+    home = PageElement('DASHBOARD')
+    frontend = PageElement('Frontend')
+    configuration = PageElement('Configuration')
+    settings = PageElement('Settings')
+    bookings = PageElement('Bookings')
 
     _links = {
         'bookings': 'test.BookingsPage'
@@ -44,35 +46,37 @@ class DashboardPage(BasePage):
 
 
 class BookingRow(PageComponent):
-    tick = PageElement('td:nth-child(1) input[type="checkbox"]', by='css selector')
-    number = PageElement('td:nth-child(2)', by='css selector')
-    id_ = PageElement('td:nth-child(3)', by='css selector')
-    reference = PageElement('td:nth-child(4)', by='css selector')
-    customer = PageElement('td:nth-child(5)', by='css selector')
-    module = PageElement('td:nth-child(6)', by='css selector')
-    date = PageElement('td:nth-child(7)', by='css selector')
-    total = PageElement('td:nth-child(8)', by='css selector')
-    paid = PageElement('td:nth-child(9)', by='css selector')
-    remaining = PageElement('td:nth-child(10)', by='css selector')
-    status = PageElement('td:nth-child(11)', by='css selector')
-    view_button = PageElement('td:nth-child(12) a:nth-child(1)', by='css selector')
-    edit_button = PageElement('td:nth-child(12) a:nth-child(2)', by='css selector')
-    delete_button = PageElement('td:nth-child(12) a:nth-child(3)', by='css selector')
+    __default_by__ = By.CSS_SELECTOR
+
+    tick = PageElement('td:nth-child(1) input[type="checkbox"]')
+    number = PageElement('td:nth-child(2)')
+    id_ = PageElement('td:nth-child(3)')
+    reference = PageElement('td:nth-child(4)')
+    customer = PageElement('td:nth-child(5)')
+    module = PageElement('td:nth-child(6)')
+    date = PageElement('td:nth-child(7)')
+    total = PageElement('td:nth-child(8)')
+    paid = PageElement('td:nth-child(9)')
+    remaining = PageElement('td:nth-child(10)')
+    status = PageElement('td:nth-child(11)')
+    view_button = PageElement('td:nth-child(12) a:nth-child(1)')
+    edit_button = PageElement('td:nth-child(12) a:nth-child(2)')
+    delete_button = PageElement('td:nth-child(12) a:nth-child(3)')
 
     def view(self):
         self.view_button.click()
-        self.pageobj.wait_ajax()
+        self.b.wait_ajax()
         return 'test.BasePage'
 
     def edit(self):
         self.edit_button.click()
-        self.pageobj.wait_ajax()
+        self.b.wait_ajax()
         return 'test.BasePage'
 
     def delete(self):
         self.delete_button.click()
-        self.pageobj.wait_ajax()
-        self.pageobj.alert().accept()
+        self.b.wait_ajax()
+        self.b.alert().accept()
 
 
 class BookingTable(PageTable):
@@ -81,9 +85,11 @@ class BookingTable(PageTable):
 
 
 class BookingsPage(BasePage):
-    print_button = PageElement('Print', by='link text')
-    export_csv = PageElement('Export into CSV', by='link text')
-    booking_table = PageElement('#content table', by='css selector', component=BookingTable)
+    __default_by__ = By.LINK_TEXT
+
+    print_button = PageElement('Print')
+    export_csv = PageElement('Export into CSV')
+    booking_table = PageElement('#content table', by=By.CSS_SELECTOR, component=BookingTable)
 
 
 if __name__ == '__main__':
@@ -96,4 +102,4 @@ if __name__ == '__main__':
     page.booking_table[0].view()
     page.window(-1).save_screenshot('test2.png')
     page.window(-1).close()
-    page = page.window(0)
+    page.window(0)

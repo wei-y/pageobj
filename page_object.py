@@ -20,7 +20,7 @@ class PageElement(object):
     PageElement are used inside a PageObject to define elements on the page.
     """
 
-    def __init__(self, loc, by=By.ID, component=None, timeout=30):
+    def __init__(self, loc, by=None, component=None, timeout=30):
         self.locator = loc
         self.by = by
         self.component = component
@@ -29,9 +29,10 @@ class PageElement(object):
     def __get__(self, instance, owner):
         """Getting a PageElement will return the element"""
         page_logger.debug('Accessing page element {}'.format(self.locator))
+        loc = self._locator(instance)
         try:
-            e = self._find_element(instance.context)
-            if self.component is not None:
+            e = self._find_element(instance.context, loc)
+            if self.component:
                 e = self.component(e)
             return e
         except Exception as ex:
@@ -42,12 +43,16 @@ class PageElement(object):
     def __set__(self, instance, value):
         """Setting a PageElement will send keybord input to the element"""
         page_logger.debug('Setting page element')
-        element = self._find_element(instance.context)
+        loc = self._locator(instance)
+        element = self._find_element(instance.context, loc)
         self._set_element(element, value)
 
-    def _find_element(self, driver):
+    def _locator(self, instance):
+        by = self.by or instance.__default_by__ or By.ID
+        return by, self.locator
+
+    def _find_element(self, driver, loc):
         """Wait element appear and fetch element"""
-        loc = self.by, self.locator
         WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
         element = driver.find_element(*loc)
         page_logger.debug('Element found: {}'.format(self.locator))
@@ -85,9 +90,11 @@ class PageElement(object):
 
 class PageComponent(object):
 
+    __default_by__ = None
+
     def __init__(self, element):
         self.context = element
-        self.pageobj = PageObject(element._parent)
+        self.b = PageObject(element._parent)
 
     def __getattr__(self, name):
         # delegate to unresolvables webdriver
@@ -100,6 +107,8 @@ class PageObject(object):
     All attributes access and method calls not defined in the PageObject will
     be delegated to the webdriver.
     """
+
+    __default_by__ = None
 
     wait_ajax_script = {
         'JQUERY': 'return jQuery.active == 0;',
@@ -119,11 +128,12 @@ class PageObject(object):
         WebDriverWait(self.context, timeout).until(EC.alert_is_present())
         return self.context.switch_to.alert
 
-    def window(self, index, timeout=30):
+    def window(self, windown, timeout=30):
         script = 'return document.readyState == "complete"'
-        page_logger.debug('Switching to window[{}].'.format(index))
-        handle = self.context.window_handles[index]
-        self.context.switch_to.window(handle)
+        page_logger.debug('Switching to window[{}].'.format(windown))
+        if type(windown) is int:
+            windown = self.context.window_handles[windown]
+        self.context.switch_to.window(windown)
         WebDriverWait(self.context, timeout).until(
             lambda driver: driver.execute_script(script))
         return self
