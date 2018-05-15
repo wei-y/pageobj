@@ -122,28 +122,34 @@ class PageObject(object):
         # delegate to unresolvables webdriver
         return getattr(self.context, name)
 
+    def wait(self, condition, timeout):
+        WebDriverWait(self.context, timeout).until(condition)
+
     def alert(self, timeout=5):
         """Wait and return alert"""
         page_logger.debug('Switching to alert.')
-        WebDriverWait(self.context, timeout).until(EC.alert_is_present())
+        self.wait(EC.alert_is_present())
         return self.context.switch_to.alert
 
-    def window(self, windown, timeout=30):
+    def window(self, windown, next_page, timeout=30):
         script = 'return document.readyState == "complete"'
         page_logger.debug('Switching to window[{}].'.format(windown))
         if type(windown) is int:
             windown = self.context.window_handles[windown]
         self.context.switch_to.window(windown)
-        WebDriverWait(self.context, timeout).until(
-            lambda driver: driver.execute_script(script))
-        return self
+        self.wait(lambda driver: driver.execute_script(script), timeout)
+        return self.goto(next_page)
+
+    def frame(self, frame, next_page):
+        page_logger.debug('Switching to Frame[{}]'.format(frame))
+        self.context.switch_to.frame(frame)
+        return self.goto(next_page)
 
     def wait_ajax(self, lib='JQUERY', timeout=30):
         """Run AJAX call and wait for returning"""
         page_logger.debug('Waiting for AJAX using {}'.format(lib))
         js = self.wait_ajax_script.get(lib, 'return true;')
-        WebDriverWait(self.context, timeout).until(
-            lambda driver: driver.execute_script(js))
+        self.wait(lambda driver: driver.execute_script(js), timeout)
 
     def goto(self, next_page):
         """

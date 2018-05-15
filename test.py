@@ -66,12 +66,13 @@ class BookingRow(PageComponent):
     def view(self):
         self.view_button.click()
         self.b.wait_ajax()
-        return 'test.BasePage'
+        self.b.window(-1)
+        return self.goto('test.BasePage')
 
     def edit(self):
         self.edit_button.click()
         self.b.wait_ajax()
-        return 'test.BasePage'
+        return self.goto('test.BasePage')
 
     def delete(self):
         self.delete_button.click()
@@ -99,7 +100,7 @@ if __name__ == '__main__':
     page = page.login('admin@phptravels.com', 'demoadmin')
     page = page.nav_to('bookings')
     page.save_screenshot('test1.png')
-    page.booking_table[0].view()
-    page.window(-1).save_screenshot('test2.png')
-    page.window(-1).close()
-    page.window(0)
+    page = page.booking_table[0].view()
+    page.save_screenshot('test2.png')
+    page.close()
+    page.window(0, 'test.BookingsPage')
