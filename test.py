@@ -99,7 +99,8 @@ if __name__ == '__main__':
     page = page.login('admin@phptravels.com', 'demoadmin')
     page = page.nav_to('bookings')
     page.save_screenshot('test1.png')
-    page = page.booking_table[0].view()
-    page.save_screenshot('test2.png')
-    page.close()
-    page = page.goto('test.BookingsPage', window=0)
+    for i in range(5):
+        page = page.booking_table[i].view()
+        page.save_screenshot('test{}.png'.format(i))
+        page.close()
+        page = page.goto('test.BookingsPage', window=0)
