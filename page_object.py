@@ -131,19 +131,17 @@ class PageObject(object):
         self.wait(EC.alert_is_present())
         return self.context.switch_to.alert
 
-    def window(self, windown, next_page, timeout=30):
+    def window(self, window, timeout=30):
         script = 'return document.readyState == "complete"'
-        page_logger.debug('Switching to window[{}].'.format(windown))
-        if type(windown) is int:
-            windown = self.context.window_handles[windown]
-        self.context.switch_to.window(windown)
+        page_logger.debug('Switching to window[{}].'.format(window))
+        if type(window) is int:
+            window = self.context.window_handles[window]
+        self.context.switch_to.window(window)
         self.wait(lambda driver: driver.execute_script(script), timeout)
-        return self.goto(next_page)
 
     def frame(self, frame, next_page):
         page_logger.debug('Switching to Frame[{}]'.format(frame))
         self.context.switch_to.frame(frame)
-        return self.goto(next_page)
 
     def wait_ajax(self, lib='JQUERY', timeout=30):
         """Run AJAX call and wait for returning"""
@@ -151,12 +149,16 @@ class PageObject(object):
         js = self.wait_ajax_script.get(lib, 'return true;')
         self.wait(lambda driver: driver.execute_script(js), timeout)
 
-    def goto(self, next_page):
+    def goto(self, next_page, window=None, frame=None, timeout=30):
         """
         Move to the next page.
         next_page - the full path to the page defined in a globally visible module.
         The reason for using a string instead of a class is to avoid circular importing
         """
+        if window is not None:
+            self.window(window)
+        if frame is not None:
+            self.frame(frame)
         page_logger.debug('Changing page to <{}>'.format(next_page))
         path, cls = next_page.rsplit('.', 1)
         m = import_module(path)

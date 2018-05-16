@@ -66,8 +66,7 @@ class BookingRow(PageComponent):
     def view(self):
         self.view_button.click()
         self.b.wait_ajax()
-        self.b.window(-1)
-        return self.goto('test.BasePage')
+        return self.b.goto('test.BasePage', window=-1)
 
     def edit(self):
         self.edit_button.click()
@@ -103,4 +102,4 @@ if __name__ == '__main__':
     page = page.booking_table[0].view()
     page.save_screenshot('test2.png')
     page.close()
-    page.window(0, 'test.BookingsPage')
+    page = page.goto('test.BookingsPage', window=0)
