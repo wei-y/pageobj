@@ -16,10 +16,6 @@ page_logger.addHandler(fh)
 
 
 class PageElement(object):
-    """
-    PageElement are used inside a PageObject to define elements on the page.
-    """
-
     def __init__(self, loc, by=None, component=None, timeout=30):
         self.locator = loc
         self.by = by
@@ -27,13 +23,12 @@ class PageElement(object):
         self.timeout = timeout
 
     def __get__(self, instance, owner):
-        """Getting a PageElement will return the element"""
         page_logger.debug('Accessing page element {}'.format(self.locator))
         loc = self._locator(instance)
         try:
             e = self._find_element(instance.context, loc)
             if self.component:
-                e = self.component(e)
+                e = self.component(e, instance)
             return e
         except Exception as ex:
             page_logger.debug('Cannot find the element')
@@ -41,18 +36,16 @@ class PageElement(object):
             return None
 
     def __set__(self, instance, value):
-        """Setting a PageElement will send keybord input to the element"""
         page_logger.debug('Setting page element')
         loc = self._locator(instance)
         element = self._find_element(instance.context, loc)
         self._set_element(element, value)
 
     def _locator(self, instance):
-        by = self.by or instance.__default_by__ or By.ID
+        by = self.by or instance._default_by or By.ID
         return by, self.locator
 
     def _find_element(self, driver, loc):
-        """Wait element appear and fetch element"""
         WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
         element = driver.find_element(*loc)
         page_logger.debug('Element found: {}'.format(self.locator))
@@ -88,29 +81,48 @@ class PageElement(object):
         getattr(self, '_' + element_type, self._input)(element, value)
 
 
+class PageElements(PageElement):
+    def __get__(self, instance, owner):
+        page_logger.debug('Accessing page elements {}'.format(self.locator))
+        loc = self._locator(instance)
+        try:
+            es = self._find_elements(instance.context, loc)
+            if self.component:
+                es = map(self.component, [(e, instance) for e in es])
+            return es
+        except Exception as ex:
+            page_logger.debug('Cannot find the element')
+            page_logger.debug(str(ex))
+            return None
+
+    def __set__(self, instance, value):
+        page_logger.debug('Setting page element')
+        loc = self._locator(instance)
+        elements = self._find_elements(instance.context, loc)
+        map(self._set_element, [(e, value) for e in elements])
+
+    def _find_elements(self, driver, loc):
+        WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
+        element = driver.find_element(*loc)
+        page_logger.debug('Element found: {}'.format(self.locator))
+        return element
+
+
 class PageComponent(object):
 
-    __default_by__ = None
+    _default_by = None
 
-    def __init__(self, element):
+    def __init__(self, element, page):
         self.context = element
-        self.b = PageObject(element._parent)
+        self.page = page
 
     def __getattr__(self, name):
-        # delegate to unresolvables webdriver
         return getattr(self.context, name)
 
 
 class PageObject(object):
-    """
-    Base class for all page object.
-    All attributes access and method calls not defined in the PageObject will
-    be delegated to the webdriver.
-    """
-
-    __default_by__ = None
-
-    wait_ajax_script = {
+    _default_by__ = None
+    _wait_ajax_script = {
         'JQUERY': 'return jQuery.active == 0;',
         'ASP.NET': 'return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack() == false;'
     }
@@ -119,14 +131,12 @@ class PageObject(object):
         self.context = drv
 
     def __getattr__(self, name):
-        # delegate to unresolvables webdriver
         return getattr(self.context, name)
 
-    def wait(self, condition, timeout):
+    def wait(self, condition, timeout=30):
         WebDriverWait(self.context, timeout).until(condition)
 
     def alert(self, timeout=5):
-        """Wait and return alert"""
         page_logger.debug('Switching to alert.')
         self.wait(EC.alert_is_present())
         return self.context.switch_to.alert
@@ -144,42 +154,43 @@ class PageObject(object):
         self.context.switch_to.frame(frame)
 
     def wait_ajax(self, lib='JQUERY', timeout=30):
-        """Run AJAX call and wait for returning"""
         page_logger.debug('Waiting for AJAX using {}'.format(lib))
-        js = self.wait_ajax_script.get(lib, 'return true;')
+        js = self._wait_ajax_script.get(lib, 'return true;')
         self.wait(lambda driver: driver.execute_script(js), timeout)
 
     def goto(self, next_page, window=None, frame=None, timeout=30):
-        """
-        Move to the next page.
-        next_page - the full path to the page defined in a globally visible module.
-        The reason for using a string instead of a class is to avoid circular importing
-        """
         if window is not None:
             self.window(window)
         if frame is not None:
             self.frame(frame)
+        return self.changepage(next_page, self.context)
+
+    @staticmethod
+    def changepage(next_page, drv):
         page_logger.debug('Changing page to <{}>'.format(next_page))
         path, cls = next_page.rsplit('.', 1)
         m = import_module(path)
         cls = getattr(m, cls)
-        return cls(self.context)
+        return cls(drv)
 
 
 class PageTable(PageComponent):
 
-    __row_locator__ = ('', '')
-    __row_component__ = None
+    _row_locator = ('', '')
+    _row_component = None
 
     def __getitem__(self, index):
         row = self._all_rows()[index]
-        return self.__row_component__(row)
+        if self._row_component:
+            return self._row_component(row, self.page)
+        else:
+            return row
 
     def __len__(self):
         return len(self._all_rows())
 
     def _all_rows(self):
-        return self.context.find_elements(*self.__row_locator__)
+        return self.context.find_elements(*self._row_locator)
 
     def query(self, once=False, **conditions):
         page_logger.debug('Querying table...')
@@ -193,8 +204,8 @@ class PageTable(PageComponent):
         for i, row in enumerate(rows):
             page_logger.debug('Checking row {}...'.format(i))
 
-            if self.__row_component__:
-                row = self.__row_component__(row)
+            if self._row_component:
+                row = self._row_component(row, self.page)
 
             if not conditions or all(cond(getattr(row, attr)) for (attr, cond) in conditions.items()):
                 page_logger.debug('Found matching row: {}'.format(i))
@@ -211,3 +222,30 @@ class PageTable(PageComponent):
             return None
         else:
             return result
+
+
+def nextpage(name):
+    if type(name) is str:
+        name = {0: name}
+
+    def wrapper(f):
+        def change_page(instance, *args, **kargs):
+            r = f(instance, *args, **kargs)
+            page_name = name[0] if r is None else name[r]
+            if isinstance(instance, PageObject):
+                drv = instance.context
+            elif isinstance(instance, PageComponent):
+                drv = instance.page.context
+            else:
+                raise TypeError('Instance is not PageObject or PageComponent')
+            return PageObject.changepage(page_name, drv)
+        return change_page
+    return wrapper
+
+
+def pageconfig(**kargs):
+    def wrapper(c):
+        for k, v in kargs.items():
+            setattr(c, '_' + k, v)
+        return c
+    return wrapper
