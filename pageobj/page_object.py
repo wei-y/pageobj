@@ -224,6 +224,25 @@ class PageTable(PageComponent):
             return result
 
 
+class WaitPageLoaded(object):
+
+    def __init__(self, page, timeout=30):
+        self.page = page
+        self.timeout = 30
+
+    def __enter__(self):
+        page_logger.debug('Entering wait...')
+        self.old = self.page.find_element_by_tag_name('html').id
+
+    def __exit__(self, *args):
+        page_logger.debug('Exiting wait...')
+        self.page.wait(lambda drv, old=self.old: old != self.page.find_element_by_tag_name('html').id, self.timeout)
+        new = self.page.find_element_by_tag_name('html').id
+        page_logger.debug('Page changed: old[{}] => new[{}]'.format(self.old, new))
+        self.page.wait(lambda drv: drv.execute_script('return document.readyState == "complete";'), self.timeout)
+        page_logger.debug('Page completed.')
+
+
 def nextpage(name):
     if type(name) is str:
         name = {0: name}
