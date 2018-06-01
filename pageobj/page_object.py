@@ -77,8 +77,11 @@ class PageElement(object):
         element.send_keys(str(value))
 
     def _set_element(self, element, value):
-        element_type = element.get_attribute('type')
-        getattr(self, '_' + element_type, self._input)(element, value)
+        if element.tag_name == 'select':
+            self._select(element, value)
+        else:
+            element_type = element.get_attribute('type')
+            getattr(self, '_' + element_type, self._input)(element, value)
 
 
 class PageElements(PageElement):
@@ -96,10 +99,16 @@ class PageElements(PageElement):
             return None
 
     def __set__(self, instance, value):
+        if type(value) is str:
+            value = [value]
+        try:
+            value = (v for v in value)
+        except TypeError:
+            value = [value]
         loc = self._locator(instance)
         page_logger.debug('Setting page element: {}'.format(loc))
         elements = self._find_elements(instance.context, loc)
-        map(self._set_element, [(e, value) for e in elements])
+        map(self._set_element, [(e, v) for (e, v) in zip(elements, value)])
 
     def _find_elements(self, driver, loc):
         WebDriverWait(driver, self.timeout).until(EC.visibility_of_element_located(loc))
