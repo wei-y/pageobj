@@ -1,4 +1,5 @@
-from pageobj import PageObject, PageElement, PageComponent, PageTable, nextpage, pageconfig, WaitPageLoaded
+from pageobj import PageObject, PageElement, PageComponent, PageTable, WaitPageLoaded
+from pageobj.decorators import nextpage, pageconfig, tableconfig
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from unittest import TestCase
@@ -31,8 +32,9 @@ class PageNavigator(PageComponent):
         return menu
 
 
+@pageconfig(default_by=By.TAG_NAME)
 class BasePage(PageObject):
-    navigator = PageElement('aside', by='tag name', component=PageNavigator)
+    navigator = PageElement('aside', component=PageNavigator)
 
 
 @pageconfig(default_by=By.CSS_SELECTOR)
@@ -71,7 +73,7 @@ class BookingRow(PageComponent):
         self.page.alert().accept()
 
 
-@pageconfig(row_locator=(By.CSS_SELECTOR, 'tbody tr'), row_component=BookingRow)
+@tableconfig(row_locator=(By.CSS_SELECTOR, 'tbody tr'), row_component=BookingRow)
 class BookingTable(PageTable):
     pass
 

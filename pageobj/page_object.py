@@ -23,8 +23,8 @@ class PageElement(object):
         self.timeout = timeout
 
     def __get__(self, instance, owner):
-        page_logger.debug('Accessing page element {}'.format(self.locator))
         loc = self._locator(instance)
+        page_logger.debug('Accessing page element {}'.format(loc))
         try:
             e = self._find_element(instance.context, loc)
             if self.component:
@@ -36,13 +36,13 @@ class PageElement(object):
             return None
 
     def __set__(self, instance, value):
-        page_logger.debug('Setting page element')
         loc = self._locator(instance)
+        page_logger.debug('Setting page element: {}'.format(loc))
         element = self._find_element(instance.context, loc)
         self._set_element(element, value)
 
     def _locator(self, instance):
-        by = self.by or instance._default_by or By.ID
+        by = self.by or By.ID
         return by, self.locator
 
     def _find_element(self, driver, loc):
@@ -83,8 +83,8 @@ class PageElement(object):
 
 class PageElements(PageElement):
     def __get__(self, instance, owner):
-        page_logger.debug('Accessing page elements {}'.format(self.locator))
         loc = self._locator(instance)
+        page_logger.debug('Accessing page elements: {}'.format(loc))
         try:
             es = self._find_elements(instance.context, loc)
             if self.component:
@@ -96,8 +96,8 @@ class PageElements(PageElement):
             return None
 
     def __set__(self, instance, value):
-        page_logger.debug('Setting page element')
         loc = self._locator(instance)
+        page_logger.debug('Setting page element: {}'.format(loc))
         elements = self._find_elements(instance.context, loc)
         map(self._set_element, [(e, value) for e in elements])
 
@@ -109,9 +109,6 @@ class PageElements(PageElement):
 
 
 class PageComponent(object):
-
-    _default_by = None
-
     def __init__(self, element, page):
         self.context = element
         self.page = page
@@ -121,7 +118,6 @@ class PageComponent(object):
 
 
 class PageObject(object):
-    _default_by__ = None
     _wait_ajax_script = {
         'JQUERY': 'return jQuery.active == 0;',
         'ASP.NET': 'return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack() == false;'
@@ -241,30 +237,3 @@ class WaitPageLoaded(object):
         page_logger.debug('Page changed: old[{}] => new[{}]'.format(self.old, new))
         self.page.wait(lambda drv: drv.execute_script('return document.readyState == "complete";'), self.timeout)
         page_logger.debug('Page completed.')
-
-
-def nextpage(name):
-    if type(name) is str:
-        name = {0: name}
-
-    def wrapper(f):
-        def change_page(instance, *args, **kargs):
-            r = f(instance, *args, **kargs)
-            page_name = name[0] if r is None else name[r]
-            if isinstance(instance, PageObject):
-                drv = instance.context
-            elif isinstance(instance, PageComponent):
-                drv = instance.page.context
-            else:
-                raise TypeError('Instance is not PageObject or PageComponent')
-            return PageObject.changepage(page_name, drv)
-        return change_page
-    return wrapper
-
-
-def pageconfig(**kargs):
-    def wrapper(c):
-        for k, v in kargs.items():
-            setattr(c, '_' + k, v)
-        return c
-    return wrapper
