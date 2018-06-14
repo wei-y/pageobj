@@ -1,4 +1,4 @@
-from page_object import PageElement, PageObject, PageComponent
+from pageobject import PageElement, PageObject, PageComponent
 
 
 def nextpage(name):
@@ -20,11 +20,13 @@ def nextpage(name):
     return wrapper
 
 
-def pageconfig(default_by):
+def pageconfig(default_by=None, timeout=None):
     def wrapper(c):
         for attr in c.__dict__.values():
-            if isinstance(attr, PageElement) and attr.by is None:
+            if isinstance(attr, PageElement) and default_by and not attr.by:
                 attr.by = default_by
+        if timeout:
+            c._timeout = timeout
         return c
     return wrapper
 
