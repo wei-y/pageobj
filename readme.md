@@ -16,7 +16,7 @@ class TestLoginPage(PageObject):
     def login(self, user, password):
         self.user = user
         self.password = password
-        with self.wait_page_loaded(timeout=10):
+        with self.wait_page_loaded_after(timeout=10):
             self.login_button.click()
 ```
 
@@ -57,7 +57,7 @@ class PageNavigator(PageComponent):
         'bookings': 'test.test.BookingsPage',
     })
     def nav(self, menu):
-        with WaitAJAX(self.page):
+        with WaitAJAXAfter(self.page):
             getattr(self, menu).click()
         return menu
 
@@ -105,18 +105,18 @@ class BookingRow(PageComponent):
     @nextpage('test.test.BasePage')
     def view(self):
         windows_count = len(self.page.window_handles)
-        with WaitAJAX(self.page):
+        with WaitAJAXAfter(self.page):
             self.view_button.click()
         self.page.wait(lambda drv: len(drv.window_handles) > windows_count)
         self.page.window(-1)
 
     @nextpage('test.test.BasePage')
     def edit(self):
-        with WaitAJAX(self.page):
+        with WaitAJAXAfter(self.page):
             self.edit_button.click()
 
     def delete(self):
-        with WaitAJAX(self.page):
+        with WaitAJAXAfter(self.page):
             self.delete_button.click()
         self.page.alert().accept()
 
@@ -154,6 +154,26 @@ row = page.booking_table[0]
 result = page.booking_table.query(paid=False, total=lambda v: v>100)
 ```
 
-## That's it
+## Waiting
 
-The full example is in `test.py`
+In both `PageObject` and `PageComponent` it can wait for things to happen.
+There are two kinds of waitings: a direct waiting and waiting after operation.
+
+A direct waiting can be invoked by calling the `wait()` with a callable as
+parameter. The callable is the same as the parameter to `WebDriverWait().until()`.
+```python
+self.wait(expected_conditions.visibility_of_element_located((By.ID, 'user')))
+```
+
+Waiting after operation is called by using the `with` protocal.
+```python
+with self.wait_page_loaded_after(timeout=10):
+    self.login_button.click()
+```
+
+## And that's it
+
+The full example is in `test.py`. To run the test file, use the following command.
+```shell
+python -m unittest discover
+```

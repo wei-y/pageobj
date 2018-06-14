@@ -9,7 +9,7 @@ page_logger = logging.getLogger('PageObject')
 global_timeout = 10
 
 
-class BaseWait(object):
+class BaseWaitAfter(object):
     def __init__(self, context, timeout=None, ignore_timeout=False):
         self.context = context
         self._timeout = timeout
@@ -41,7 +41,7 @@ class BaseWait(object):
         return None
 
 
-class WaitPageLoaded(BaseWait):
+class WaitPageLoadedAfter(BaseWaitAfter):
     def __enter__(self):
         self.old = self.context.find_element_by_tag_name('html').id
 
@@ -54,9 +54,9 @@ class WaitPageLoaded(BaseWait):
         page_logger.debug('Page completed.')
 
 
-class WaitElementDisplayed(BaseWait):
+class WaitElementDisplayedAfter(BaseWaitAfter):
     def __init__(self, context, element_name, timeout=None, ignore_timeout=False):
-        super(WaitElementDisplayed, self).__init__(context, timeout, ignore_timeout)
+        super(WaitElementDisplayedAfter, self).__init__(context, timeout, ignore_timeout)
         self.element_name = element_name
 
     def _exit_action(self, *args):
@@ -67,9 +67,9 @@ class WaitElementDisplayed(BaseWait):
         page_logger.debug('Element displayed.')
 
 
-class WaitElementDisappeared(BaseWait):
+class WaitElementDisappearedAfter(BaseWaitAfter):
     def __init__(self, context, element_name, timeout=None, ignore_timeout=False):
-        super(WaitElementDisappeared, self).__init__(context, timeout, ignore_timeout)
+        super(WaitElementDisappearedAfter, self).__init__(context, timeout, ignore_timeout)
         self.element_name = element_name
 
     def _exit_action(self, *args):
@@ -80,9 +80,9 @@ class WaitElementDisappeared(BaseWait):
         page_logger.debug('Element disappeared.')
 
 
-class WaitElementChanged(BaseWait):
+class WaitElementChangedAfter(BaseWaitAfter):
     def __init__(self, context, element_name, timeout=None, ignore_timeout=False):
-        super(WaitElementChanged, self).__init__(context, timeout, ignore_timeout)
+        super(WaitElementChangedAfter, self).__init__(context, timeout, ignore_timeout)
         e = self._element(element_name)
         self.locator = e.by or By.ID, e.locator
 
@@ -100,19 +100,19 @@ class WaitElementChanged(BaseWait):
         page_logger.debug('Element changed: old[{}] => new[{}]'.format(self.old, new))
 
 
-class WaitAJAX(BaseWait):
-    _wait_ajax_script = {
+class WaitAJAXAfter(BaseWaitAfter):
+    _wait_ajax_after_script = {
         'JQUERY': 'return jQuery.active == 0;',
         'ASP.NET': 'return Sys.WebForms.PageRequestManager.getInstance().get_isInAsyncPostBack() == false;'
     }
 
     def __init__(self, context, lib='JQUERY', timeout=None, ignore_timeout=False):
-        super(WaitAJAX, self).__init__(context, timeout, ignore_timeout)
+        super(WaitAJAXAfter, self).__init__(context, timeout, ignore_timeout)
         self.lib = lib
 
     def _exit_action(self, *args):
         page_logger.debug('Waiting for AJAX using {}'.format(self.lib))
-        js = self._wait_ajax_script.get(self.lib, 'return true;')
+        js = self._wait_ajax_after_script.get(self.lib, 'return true;')
         self.context.wait(lambda driver: driver.execute_script(js), self.timeout)
         page_logger.debug('AJAX done.')
 
@@ -134,17 +134,17 @@ class WaitMixin(object):
             else:
                 raise e
 
-    def wait_page_loaded(self, timeout=None, ignore_timeout=False):
-        return WaitPageLoaded(self.page, timeout, ignore_timeout)
+    def wait_page_loaded_after(self, timeout=None, ignore_timeout=False):
+        return WaitPageLoadedAfter(self.page, timeout, ignore_timeout)
 
-    def wait_element_displayed(self, element_name, timeout=None, ignore_timeout=False):
-        return WaitElementDisplayed(self, element_name, timeout, ignore_timeout)
+    def wait_element_displayed_after(self, element_name, timeout=None, ignore_timeout=False):
+        return WaitElementDisplayedAfter(self, element_name, timeout, ignore_timeout)
 
-    def wait_element_disappeared(self, element_name, timeout=None, ignore_timeout=False):
-        return WaitElementDisappeared(self, element_name, timeout, ignore_timeout)
+    def wait_element_disappeared_after(self, element_name, timeout=None, ignore_timeout=False):
+        return WaitElementDisappearedAfter(self, element_name, timeout, ignore_timeout)
 
-    def wait_element_changed(self, element_name, timeout=None, ignore_timeout=False):
-        return WaitElementChanged(self, element_name, timeout, ignore_timeout)
+    def wait_element_changed_after(self, element_name, timeout=None, ignore_timeout=False):
+        return WaitElementChangedAfter(self, element_name, timeout, ignore_timeout)
 
-    def wait_ajax(self, lib='JQUERY', timeout=None, ignore_timeout=False):
-        return WaitAJAX(self.page, lib, timeout, ignore_timeout)
+    def wait_ajax_after(self, lib='JQUERY', timeout=None, ignore_timeout=False):
+        return WaitAJAXAfter(self.page, lib, timeout, ignore_timeout)
