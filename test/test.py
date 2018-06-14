@@ -1,5 +1,6 @@
-from pageobj import PageObject, PageElement, PageComponent, PageTable, WaitPageLoaded
-from pageobj.decorators import nextpage, pageconfig, tableconfig
+from pageobject import PageObject, PageElement, PageComponent, PageTable
+from pageobject.decorators import nextpage, pageconfig, tableconfig
+from pageobject.wait import WaitAJAX
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from unittest import TestCase
@@ -15,7 +16,7 @@ class TestLoginPage(PageObject):
     def login(self, user, password):
         self.user = user
         self.password = password
-        with WaitPageLoaded(self):
+        with self.wait_page_loaded(timeout=10):
             self.login_button.click()
 
 
@@ -27,8 +28,8 @@ class PageNavigator(PageComponent):
         'bookings': 'test.test.BookingsPage',
     })
     def nav(self, menu):
-        getattr(self, menu).click()
-        self.page.wait_ajax()
+        with WaitAJAX(self.page):
+            getattr(self, menu).click()
         return menu
 
 
@@ -57,23 +58,26 @@ class BookingRow(PageComponent):
     @nextpage('test.test.BasePage')
     def view(self):
         windows_count = len(self.page.window_handles)
-        self.view_button.click()
-        self.page.wait_ajax()
+        with WaitAJAX(self.page):
+            self.view_button.click()
         self.page.wait(lambda drv: len(drv.window_handles) > windows_count)
         self.page.window(-1)
 
     @nextpage('test.test.BasePage')
     def edit(self):
-        self.edit_button.click()
-        self.page.wait_ajax()
+        with WaitAJAX(self.page):
+            self.edit_button.click()
 
     def delete(self):
-        self.delete_button.click()
-        self.page.wait_ajax()
+        with WaitAJAX(self.page):
+            self.delete_button.click()
         self.page.alert().accept()
 
 
-@tableconfig(row_locator=(By.CSS_SELECTOR, 'tbody tr'), row_component=BookingRow)
+@tableconfig(
+    row_locator=(By.CSS_SELECTOR, 'tbody tr'),
+    row_component=BookingRow
+)
 class BookingTable(PageTable):
     pass
 

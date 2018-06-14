@@ -1,12 +1,11 @@
 # Selenium Page Object in Python
+
+This document is using the admin module of [PHPTravel Demo]('https://phptravels.com/demo/'') site to illustrate the usage of this package.
+
 ## Defining a page
-Define a page by inherit from `PageObject` and declare all elements.
-A default `By` can be configed by using decorator `pageconfig`.
 
-Elements defined on the page are wrapped Selenium page elements by default. They can be used directly in page actions by using `.` notation. The element will be evaluated at accessing moment.
-
-The next page of the action can be defined by using decorator `nextpage`. the parameter to the decorator is the package/module name of the next page object.
-```Python
+The Admin login page can be defined as following.
+```python
 @pageconfig(default_by=By.CSS_SELECTOR)
 class TestLoginPage(PageObject):
     user = PageElement('input[name="email"]')
@@ -17,36 +16,75 @@ class TestLoginPage(PageObject):
     def login(self, user, password):
         self.user = user
         self.password = password
-        self.login_button.click()
+        with self.wait_page_loaded(timeout=10):
+            self.login_button.click()
 ```
 
-## Page component
-A page component can be defined in the similar way as the `PageObject` only it is inherited from `PageComponent`.
-The defined component can be used in other pages like the raw page element above.
-```Python
+### PageObject
+
+A page is defined by creating a class inherited from `PageObject` and declare
+all interested elements in the class as class attributes. An element declaration is an instance of `PageElement` class with selector as parameter.
+When accessing the element, it will return a raw Selenium WebElement, a
+`PageComonent` or the text/value of the element based on parameters to the
+`PageElement` initiator.
+
+### Adding actions
+
+Page actions are defined as normal class methods which will us elements
+declared previously. Elements can be get by using `.` notation on `self` and
+will be evaluated at runtime. Elements can also be set by using assign
+statement. Acceptable type of Values is based on the type of the element.
+
+If the action is leading to another page which is also defined as a
+`PageObject`, a decorator `nextpage()` can be used on the action to describe
+the package/module path string to the page class.
+
+### Default page settings
+
+Using decorator `pageconfig()` to the `PageObject` to define the default `By`
+of element selectors and default timeout when accessing `PageElement`
+
+## PageComponent
+
+The base Dashborad page can be defined as following. Notice that the navigator
+is defined as a `PageComponent`.
+```python
 @pageconfig(default_by=By.LINK_TEXT)
 class PageNavigator(PageComponent):
-    home = PageElement('DASHBOARD')
-    frontend = PageElement('Frontend')
-    configuration = PageElement('Configuration')
-    settings = PageElement('Settings')
     bookings = PageElement('Bookings')
 
-    @nextpage('bookings': 'test.BookingsPage')
-    def bookings(self):
-        for m in menus:
-            self.bookings.click()
-            self.page.wait_ajax()
+    @nextpage({
+        'bookings': 'test.test.BookingsPage',
+    })
+    def nav(self, menu):
+        with WaitAJAX(self.page):
+            getattr(self, menu).click()
+        return menu
 
+@pageconfig(default_by=By.TAG_NAME)
 class BasePage(PageObject):
-    navigator = PageElement('nav', by='tag name', component=PageNavigator)
+    navigator = PageElement('aside', component=PageNavigator)
 ```
 
-## Defining Table
-A table is any table-like structure defined in the DOM. Of course a `<Table>` can be defined in this way. The benefit of using `PageTable` is that it provides index access and query ability.
+After logging in, the dashboard is more complex. Here a class containing
+only the navigator is defined as the base of each different pages. The
+navigator is a relatively independent section thus it is defined as a component
+using `PageComponent`.
 
-A table row is defined as a `PageComponent` with each column as a sub-element or component. Since it is a Component, action can be defined in table row as well.
-```Python
+A `PageComponent` is similar to `PageObject`. It contains sub-elements the same
+way as `PageObject`. The difference is that all sub-element is defined in the
+context of the container component.
+
+A `PageComponent` can be used in other `PageObject` or nest in other `PageComponent` by passing in the component parameter to `PageElement`
+definition.
+
+Decorators applicable to `PageObject` are also applicable to `PageComponent`.
+
+## PageTable
+
+The Booking page can be defined as following. Notice that the main table is
+defined as a `PageTable`.
+```python
 @pageconfig(default_by=By.CSS_SELECTOR)
 class BookingRow(PageComponent):
     tick = PageElement('td:nth-child(1) input[type="checkbox"]')
@@ -64,18 +102,28 @@ class BookingRow(PageComponent):
     edit_button = PageElement('td:nth-child(12) a:nth-child(2)')
     delete_button = PageElement('td:nth-child(12) a:nth-child(3)')
 
-    @nextpage('test.BasePage')
+    @nextpage('test.test.BasePage')
     def view(self):
         windows_count = len(self.page.window_handles)
-        self.view_button.click()
-        self.page.wait_ajax()
+        with WaitAJAX(self.page):
+            self.view_button.click()
         self.page.wait(lambda drv: len(drv.window_handles) > windows_count)
         self.page.window(-1)
-```
 
-Once a table row is defined, it then can be used to define a `PageTable` by specify the row selector and class in `pageconfig` decorator. Then, the defined table can be used as a component in a `PageObject`.
-```Python
-@pageconfig(row_locator=(By.CSS_SELECTOR, 'tbody tr'), row_component=BookingRow)
+    @nextpage('test.test.BasePage')
+    def edit(self):
+        with WaitAJAX(self.page):
+            self.edit_button.click()
+
+    def delete(self):
+        with WaitAJAX(self.page):
+            self.delete_button.click()
+        self.page.alert().accept()
+
+@tableconfig(
+    row_locator=(By.CSS_SELECTOR, 'tbody tr'),
+    row_component=BookingRow
+)
 class BookingTable(PageTable):
     pass
 
@@ -86,11 +134,26 @@ class BookingsPage(BasePage):
     booking_table = PageElement('#content table', by=By.CSS_SELECTOR, component=BookingTable)
 ```
 
+### Defining a PageTable
+
+A `PageTable` is any table-like structure defined in the DOM. a `<Table>`
+could naturally be defined as a `PageTable` but any structure in a table-like
+way can do. The benefit of using `PageTable` is that it provides index access
+and query ability.
+
+A table row is defined as a `PageComponent` with each column as a sub-element or component. Since it is a Component, action can be defined in table row as well.
+
+Once a table row is defined, it then can be used to define a `PageTable` by specify the row selector and class in `tableconfig` decorator. Then, the defined table can be used as a component in a `PageObject`.
+
+### Accessing by index and querying
+
 Table rows can be accessed by using index notation. Table can also be queried by providing filters to columns. The filter can be a string or a function returning Boolean.
-```Python
+
+```python
 row = page.booking_table[0]
 result = page.booking_table.query(paid=False, total=lambda v: v>100)
 ```
 
-## And that's it!
+## That's it
+
 The full example is in `test.py`
