@@ -103,11 +103,7 @@ class DemoTest(TestCase):
         self.page.quit()
 
     def _login(self, usr=None, pwd=None):
-        if usr is None:
-            usr = self.user
-        if pwd is None:
-            pwd = self.pwd
-        self.page = self.page.login(usr, pwd)
+        self.page = self.page.login(usr or self.user, pwd or self.pwd)
 
     def test_login(self):
         self._login()
