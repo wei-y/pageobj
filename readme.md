@@ -1,6 +1,6 @@
 # Selenium Page Object in Python
 
-This document is using the admin module of [PHPTravel Demo]('https://phptravels.com/demo/'') site to illustrate the usage of this package.
+This document is using the admin module of [PHPTravel Demo]('https://phptravels.com/demo/') site to illustrate the usage of this package.
 
 ## Defining a page
 
