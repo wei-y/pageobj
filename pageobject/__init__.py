@@ -1,1 +1,1 @@
-from pageobject import *
+from .pageobject import *

@@ -1,10 +1,28 @@
 # Selenium Page Object in Python
 
-This document is using the admin module of [PHPTravel Demo](https://phptravels.com/demo/) site to illustrate the usage of this package.
+Features of this package :
+- Page object pattern in Python: concise descriptive definition for pages and
+  element selectors
+- High level data structure of elements: array, dictionary, template, table, etc.
+  and building customized component
+  hierarchically
+- Wrap Selenium for human being:
+  - wait things to happen using `with` protocal
+  - wait for elements to show before operating on it
+  - return `None` in place of raising exception when element not found
+  - flexible routing decorator to convert page object to proper classes
+  - fall back to raw Selenium if required
 
-## Defining a page
+## Usage
 
-The Admin login page can be defined as following.
+### Dependencies
+This package depends nothing more than built-in packages of Python 3 and
+Selenium Python Binding. Setup Selenium local, server or grid as required
+and create PageObject from the WebDriver object.
+
+### Defining a page
+
+A login page could be defined as following.
 ```python
 @pageconfig(default_by=By.CSS_SELECTOR)
 class TestLoginPage(PageObject):
@@ -12,6 +30,8 @@ class TestLoginPage(PageObject):
     password = PageElement('input[name="password"]')
     login_button = PageElement('button[type="submit"]')
 
+    # Suppose we have a module called `test.py` and a PageObject class `BasePage`
+    # is defined in it When user logged in they will land on the BasePage
     @nextpage('test.BasePage')
     def login(self, user, password):
         self.user = user
@@ -20,24 +40,28 @@ class TestLoginPage(PageObject):
             self.login_button.click()
 ```
 
-### PageObject
+## PageObject
 
 A page is defined by creating a class inherited from `PageObject` and declare
-all interested elements in the class as class attributes. An element declaration is an instance of `PageElement` class with selector as parameter.
+all interested elements in the class as class attributes. An element declaration
+is an instance of `PageElement` class with selector as parameter.
 When accessing the element, it will return a raw Selenium WebElement, a
 `PageComonent` or the text/value of the element based on parameters to the
 `PageElement` initiator.
 
 ### Adding actions
 
-Page actions are defined as normal class methods which will us elements
-declared previously. Elements can be get by using `.` notation on `self` and
-will be evaluated at runtime. Elements can also be set by using assign
+Page actions are defined as normal class methods which will use elements
+declared previously. Elements are defined as descriptors and
+will be evaluated at runtime. Elements can also be set by using assignment
 statement. Acceptable type of Values is based on the type of the element.
 
 If the action is leading to another page which is also defined as a
 `PageObject`, a decorator `nextpage()` can be used on the action to describe
-the package/module path string to the page class.
+the package/module path string to the page class. The target page class can be
+statically coded as a string, or a dictionary that can be looked up at runtime
+by using the return value of the method as key, or it can be a function taking
+the returned value as input and returns the targe page class string.
 
 ### Default page settings
 
@@ -45,6 +69,9 @@ Using decorator `pageconfig()` to the `PageObject` to define the default `By`
 of element selectors and default timeout when accessing `PageElement`
 
 ## PageComponent
+
+Some elements on the page can be organized togather as a small functional
+component that can be reused in different places.
 
 The base Dashborad page can be defined as following. Notice that the navigator
 is defined as a `PageComponent`.
@@ -75,7 +102,8 @@ A `PageComponent` is similar to `PageObject`. It contains sub-elements the same
 way as `PageObject`. The difference is that all sub-element is defined in the
 context of the container component.
 
-A `PageComponent` can be used in other `PageObject` or nest in other `PageComponent` by passing in the component parameter to `PageElement`
+A `PageComponent` can be used in other `PageObject` or nest in other
+`PageComponent` by passing in the component parameter to `PageElement`
 definition.
 
 Decorators applicable to `PageObject` are also applicable to `PageComponent`.
