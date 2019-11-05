@@ -854,6 +854,16 @@ class PageBase(WaitMixin):
         ac = ActionChains(self.page)
         ac.drag_and_drop(element, target).perform()
 
+    def scroll_to(self, element):
+        """
+        Scroll an element on the page into view property
+
+        Args:
+            element (webelement): The element to be scrolled into view
+        """
+        ac = ActionChains(self.page)
+        ac.move_to_element(element).perform()
+
 
 class PageComponent(PageBase):
     """
