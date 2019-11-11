@@ -80,7 +80,10 @@ class WaitPageLoadedAfter(BaseWaitAfter):
 
     def __enter__(self):
         """Read `id` of <html> before action"""
-        self.old = self.context.find_element_by_tag_name('html').id
+        try:
+            self.old = self.context.find_element_by_tag_name('html').id
+        except NoSuchElementException:
+            self.old = None
 
     def _exit_action(self, *args):
         """Compoare `id` of <html> until it is change, then wait for `document.readyState` to be complete"""
