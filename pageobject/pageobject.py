@@ -1,11 +1,12 @@
 
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.select import Select
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.select import Select
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
-from selenium.webdriver.common.action_chains import ActionChains
 from importlib import import_module
 import logging
 import traceback
@@ -16,7 +17,7 @@ from .cache import PageElementCache
 
 page_logger = logging.getLogger('PageObject')
 page_logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('pageobject.log', "w")
+fh = logging.FileHandler('pageobject.log', "w", 'utf-8')
 formatter = logging.Formatter('%(asctime)s %(pathname)s [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
 fh.setFormatter(formatter)
 page_logger.addHandler(fh)
@@ -252,7 +253,7 @@ class PageElement(object):
             e = self.component(e, instance.page) if self.component else e
             self.write_hook(instance, e, value)
         else:
-            self._set_element(e, value)
+            self._set_element(instance, e, value)
 
     def _get_element(self, element):
         """
@@ -288,7 +289,7 @@ class PageElement(object):
             act = 'default'
         return actions.get(act, actions['default'])(element)
 
-    def _set_element(self, element, value):
+    def _set_element(self, instance, element, value):
         """
         Default rule to set value to WebElement.
           - <select>: select_by_visible_text()
@@ -304,7 +305,7 @@ class PageElement(object):
             select=lambda e, v: Select(e).select_by_visible_text(v),
             checkbox=lambda e, v: e.click() if e.is_selected() is not v else None,
             radio=lambda e, v: e.click() if v else None,
-            default=lambda e, v: (e.clear(), e.send_keys(str(value)))
+            default=lambda e, v: (instance.clear_text(e), e.send_keys(str(value)))
         )
         act = 'select' if element.tag_name == 'select' else element.get_attribute('type')
         actions.get(act, actions['default'])(element, value)
@@ -662,7 +663,7 @@ class PageElementDict(PageElement):
             page_logger.debug('Fetching item value: {}'.format(self.value_loc))
             ves = self._find(item, instance, self.value_loc, item.find_elements)
             value = [self._convert_element(instance, ve) for ve in ves]
-            value = value[0] if len(value) == 1 else value
+            value = None if not value else (value[0] if len(value) == 1 else value)
             page_logger.debug('Got value {}'.format(value))
         except Exception:
             page_logger.debug('Cannot find the element value')
@@ -863,6 +864,30 @@ class PageBase(WaitMixin):
         """
         ac = ActionChains(self.page)
         ac.move_to_element(element).perform()
+
+    def clear_text(self, element):
+        """
+        Clear the text in text input using ActionChain.
+
+        The standard WebElement.clear() does not fire onChange in React. It's not an exact equivalant behaviour of human
+        action. Plus, I found that different versions of Chrome respond to the call differently, specifically, in Chrome
+        78.0.3904.97 the call is not respected at all, while in docker image selenium/node-chrome:3.14.0-dubnium the call
+        is processed reliably.
+
+        See discussions here for detail:
+            https://github.com/SeleniumHQ/selenium/issues/6741
+            https://bugs.chromium.org/p/chromedriver/issues/detail?id=2702&q=&sort=-id&colspec=ID%20Status%20Pri%20Owner%20Summary
+        Selenium team won't "fix" this issue, neither will Chromium project. So as a workaround, this method mimic human
+        action step by step using ActionChain to ensure that the field is cleared properly.
+
+        Args:
+            element (WebDriver): the text input element to be cleared.
+        """
+        ac = ActionChains(self.page)
+        ac.click(element) \
+            .key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL) \
+            .send_keys(Keys.BACK_SPACE) \
+            .perform()
 
 
 class PageComponent(PageBase):
