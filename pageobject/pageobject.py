@@ -9,18 +9,10 @@ from selenium.webdriver.remote.webelement import WebElement
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException
 from importlib import import_module
 import logging
+import sys
 import traceback
 
 from .wait import WaitMixin
-from .cache import PageElementCache
-
-
-page_logger = logging.getLogger('PageObject')
-page_logger.setLevel(logging.DEBUG)
-fh = logging.FileHandler('pageobject.log', "w", 'utf-8')
-formatter = logging.Formatter('%(asctime)s %(pathname)s [%(levelname)s]: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-fh.setFormatter(formatter)
-page_logger.addHandler(fh)
 
 
 class PageElement(object):
@@ -31,37 +23,38 @@ class PageElement(object):
 
     - When reading a `PageElement`
 
-      1. locate the element by the locator
-      #. if component is not None, cast the element as specified `PageComponent` and use it as the value
-      #. if component is None and value_only is True, get value from the element located directly (1_).
-      #. if component is None and value_only is False, use the located element as value
-      #. following any of the above steps, apply read_hook to the value if read_hook is not None, otherwise return value
+        1. locate the element by the locator
+        #. if component is not None, cast the element as specified `PageComponent` and use it as the value
+        #. if component is None and value_only is True, get value from the element located directly (1_).
+        #. if component is None and value_only is False, use the located element as value
+        #. following any of the above steps, apply read_hook to the value if read_hook is not None, otherwise return value
 
     - When writing a `PageElement`, value_only has no effect
 
-      1. locate the element by the locator
-      #. if write_hook is None, set value to the element directly (2_)
-      #. if write_hook is not None and component is None, apply write_hook to the element located
-      #. if write_hook is not None and component is set, cast the element located as specified `PageComponent` and apply
-         write_hook to it
+        1. locate the element by the locator
+        #. if write_hook is None, set value to the element directly (2_)
+        #. if write_hook is not None and component is None, apply write_hook to the element located
+        #. if write_hook is not None and component is set, cast the element located as specified `PageComponent` and apply
+            write_hook to it
 
     .. [1] Rules to get value from an element:
 
-      - <checkbox>/<radio>: is_selected()
-      - <input type="text">/<input type="url">/<input type="number">/<textarea>: "value" attribute
-      - <select>: first_selected_option.text
-      - all the other tags: "textContent" attribute
+        - <checkbox>/<radio>: is_selected()
+        - <input type="text">/<input type="url">/<input type="number">/<textarea>: "value" attribute
+        - <select>: first_selected_option.text
+        - all the other tags: "textContent" attribute
 
     .. [2] Rules to set value to an element:
 
-      - <checkbox>/<radio>: click()
-      - <select>: select_by_visible_text()
-      - all ther other tags: clear() and send_keys()
+        - <checkbox>/<radio>: click()
+        - <select>: select_by_visible_text()
+        - all ther other tags: clear() and send_keys()
 
 
     """
 
-    def __init__(self, loc, by=None, component=None, value_only=False, ignore_visibility=False, timeout=0, read_hook=None, write_hook=None, enable_cache=False):
+    def __init__(self, loc, by=None, component=None, value_only=False, ignore_visibility=False, timeout=0,
+                read_hook=None, write_hook=None):
         """
         Create a new DOM element descriptor
 
@@ -73,7 +66,7 @@ class PageElement(object):
                 `pageconfig` of the current context.
             component (Sub-class of `PageComponent`, optional): The component of the current DOM. Defaults to None.
                 If a DOM element is a wrapper of a functional component, the component can be defined by another class
-                inherited from `PageComponent`. Apart from locating the element, it is also cast as the component object.
+                inherited from `PageComponent`. Apart from locating the element, it's also cast as the component object.
             value_only (bool, optional): The descriptor returns the element value if True. Defaults to False.
                 The element value is defined as following:
                 - <checkbox>/<radio>: is_selected()
@@ -89,7 +82,6 @@ class PageElement(object):
                 The function must take two arguments (driver, element) and returns a value
             write_hook (callable, optional): a function to handle what happens when writing to an element.
                 Defaults to None. The function must take three arguments (driver, element, value)
-            enable_cache (bool, optional): Experiment feature to speed up finding elements. Defaults to False.
         """
         self.locator = loc
         self.by = by
@@ -99,32 +91,25 @@ class PageElement(object):
         self.ignore_visibility = ignore_visibility
         self.read_hook = read_hook
         self.write_hook = write_hook
-        self.enable_cache = enable_cache
 
     def __get__(self, instance, owner):
         """Reading entrance to the descriptor. Return None if the element does not exist"""
 
-        page_logger.debug('Accessing web element "{}": {}'.format(self.name, self._locator))
+        instance.logger.debug('Accessing web element "{}": {}'.format(self.name, self._locator))
         try:
-            element = self._read_cache(instance)
-            if element is None:
-                element = self._find_element(instance, self._locator)
-                self._write_cache(instance, element)
+            element = self._find_element(instance, self._locator)
             return self._convert_element(instance, element)
         except Exception:
-            page_logger.debug('Cannot find the element')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find the element')
+            instance.logger.debug(traceback.format_exc())
             return None
 
     def __set__(self, instance, value):
         """Write entrance to the descriptor. Raises NoSuchElement if element does not exist"""
 
-        page_logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, self._locator, value))
-        element = self._read_cache(instance)
-        if element is None:
-            element = self._find_element(instance, self._locator)
+        instance.logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, self._locator, value))
+        element = self._find_element(instance, self._locator)
         self._assign_element(instance, element, value)
-        self._write_cache(instance, element)
 
     def __set_name__(self, owner, name):
         self.name = name
@@ -136,86 +121,64 @@ class PageElement(object):
     def _locator(self):
         return self.by or By.ID, self.locator
 
-    def _read_cache(self, instance, locator=None):
-        # read cahced element by ccontext ID (None if context is a page) and the selector text
-        # a specific locator different from self.locator can be passed in (sub-class PageElementTemplate uses this parameter)
-        # cache is stored in the PageObject instance which is visible to any elements on the page
-        if not self.enable_cache or not instance.page.enable_cache:
-            return None
-        context_id = None if isinstance(instance, PageObject) else instance._id
-        try:
-            context_hash = None if isinstance(instance, PageObject) else hash(instance.get_attribute('outerHTML'))
-        except StaleElementReferenceException:
-            page_logger.debug('Element context is stale, skipped reading from cache.')
-            return
-        locator = self._locator if locator is None else locator
-        return instance.page.cache.read(context_id, context_hash, locator)
-
-    def _write_cache(self, instance, element, locator=None):
-        # write cahced element by ccontext ID (None if context is a page) and the selector text
-        # a specific locator different from self.locator can be passed in (sub-class PageElementTemplate uses this parameter)
-        # cache is stored in the PageObject instance which is visible to any elements on the page
-        if not self.enable_cache or not instance.page.enable_cache:
-            return
-        context_id = None if isinstance(instance, PageObject) else instance._id
-        try:
-            context_hash = None if isinstance(instance, PageObject) else hash(instance.get_attribute('outerHTML'))
-        except StaleElementReferenceException:
-            page_logger.debug('Element context is stale, skipped writing to cache.')
-            return
-        locator = self._locator if locator is None else locator
-        instance.page.cache.write(context_id, context_hash, locator, element)
-
     def _find(self, driver, instance, loc, func):
         """
         Wait for element to be visible then return the element(s).
 
         Args:
             driver (WebDriver): The webdriver instance currently used.
-            instance (WebElement): The context of the current descriptor
+            instance (PageObject or PageComponent): The context of the current descriptor
             loc (tuple): Locator of the element
-            func ([type]): Either webdriver.find_element or web_driver.find_elements
+            func (fucntion): Either webdriver.find_element or web_driver.find_elements
 
         Raises:
-            TimeoutException: the element is not visible after timeout. It will not be raised when ignore_timeout is True.
+            TimeoutException: the element is not visible after timeout. It will not be raised
+                when ignore_timeout is True.
             NoSuchElementException: the element does not exist when timeout is not spefified
 
         Returns:
             WebElement: The located web element
         """
 
+        # call element access hook if it is defined
+        # don't access any PageElement in the hook, otherwise it will cause infinite recursive
+        if hasattr(instance.page, 'on_access_element'):
+            instance.page.on_access_element()
+        if hasattr(instance, 'on_access_element'):
+            instance.on_access_element()
+
         if self.timeout(instance) != 0:
             try:
                 WebDriverWait(driver, self.timeout(instance)).until(EC.visibility_of_element_located(loc))
             except TimeoutException as e:
                 if self.ignore_visibility:
-                    page_logger.debug('Timeout when waiting element visible, ignore the error and try to operate on the element')
-                    page_logger.debug(traceback.format_exc())
+                    instance.logger.debug(
+                        'Timeout when waiting element visible, ignore the error and try to operate on the element')
+                    instance.logger.debug(traceback.format_exc())
                 else:
                     raise e
         try:
             element = func(*loc)
         except NoSuchElementException as e:
-            page_logger.debug('Cannot find the element {}: {} on page'.format(self.name, loc))
+            instance.logger.debug('Cannot find the element {}: {} on page'.format(self.name, loc))
             raise e
-        page_logger.debug('Element found')
         return element
 
     def _find_element(self, instance, loc):
-        return self._find(instance.context, instance, loc, instance.context.find_element)
+        return self._find(instance.page.context, instance, loc, instance.context.find_element)
 
     def _find_elements(self, instance, loc):
-        return self._find(instance.context, instance, loc, instance.context.find_elements)
+        return self._find(instance.page.context, instance, loc, instance.context.find_elements)
 
     def _convert_element(self, instance, e):
         """
         Convert a raw WebElement to a proper value.
 
         There are four possible return values of a web element:
-          1. A component defined by the user
-          #. The text/value of the element
-          #. The raw WebElement object
-          #. The value returned by read_hook, this can be applied after any of the above 3
+            #. A component defined by the user
+            #. The text/value of the element
+            #. The raw WebElement object
+            #. The value returned by read_hook, this can be applied after any of the above 3
 
         Args:
             instance (WebElement): The context of the current element
@@ -258,10 +221,10 @@ class PageElement(object):
     def _get_element(self, element):
         """
         Default rule to get value from WebElement.
-          - <select>: first selecte option text
-          - <input type="radio">/<input type="checkbox">: is_selected()
-          - <textarea>/<input type="text">/<input type="number">/<input type="url">: value attribute of the element
-          - all the others: textContent attribute of the element
+            - <select>: first selecte option text
+            - <input type="radio">/<input type="checkbox">: is_selected()
+            - <textarea>/<input type="text">/<input type="number">/<input type="url">: value attribute of the element
+            - all the others: textContent attribute of the element
 
         Args:
             element (WebElement): The element to be read
@@ -292,10 +255,10 @@ class PageElement(object):
     def _set_element(self, instance, element, value):
         """
         Default rule to set value to WebElement.
-          - <select>: select_by_visible_text()
-          - <input type="checkbox">: click the element if value is different the is_selected()
-          - <input type="radio">: click the element if value is True
-          - all the others: clear() and then send_keys()
+            - <select>: select_by_visible_text()
+            - <input type="checkbox">: click the element if value is different the is_selected()
+            - <input type="radio">: click the element if value is True
+            - all the others: clear() and then send_keys()
 
         Args:
             element (WebElement): The element to be set
@@ -314,12 +277,14 @@ class PageElement(object):
 class PageElements(PageElement):
     """
     Similar to `PageElement` in most behaviours. The variation of this class is that it represents an array of elements
-    located by using find_elements(). All configurations defined in __init__ of `PageElement` apply to each element in the array.
+    located by using find_elements(). All configurations defined in __init__ of `PageElement` apply to each element in
+    the array.
 
     When setting to this descriptor, it accepts different value types and behaves differently:
-      - list/tuple: the list/tuple is zipped with elements located and set using the same rule as `PageElement`
-      - dictionary: set elements at certain index to specified values. Keys of the dict are indexes and values are values to be set to
-      - str/int: set *all* elements to the value passed in
+        - list/tuple: the list/tuple is zipped with elements located and set using the same rule as `PageElement`
+        - dictionary: set elements at certain index to specified values. Keys of the dict are indexes and values
+            are values to be set to
+        - str/int: set *all* elements to the value passed in
     """
 
     def __get__(self, instance, owner):
@@ -330,35 +295,30 @@ class PageElements(PageElement):
         If element cannot be found, it will return [].
         """
 
-        page_logger.debug('Accessing web elements: "{}": {}'.format(self.name, self._locator))
+        instance.logger.debug('Accessing web elements: "{}": {}'.format(self.name, self._locator))
         try:
-            elements = self._read_cache(instance)
-            if elements is None:
-                elements = self._find_elements(instance, self._locator)
-                self._write_cache(instance, elements)
+            elements = self._find_elements(instance, self._locator)
             elements = [self._convert_element(instance, e) for e in elements]
             return elements
         except Exception:
-            page_logger.debug('Cannot find the element')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find the element')
+            instance.logger.debug(traceback.format_exc())
             return []
 
     def __set__(self, instance, value):
         """
         Set values to an array of elements.
-          - set an element array to str/int will change all cells in the array to the value
-          - set an element array to another array will change elements in corresponding index to the value
-          - set an element array to a dict using integer as key will set elements in corresponding index to the value
-          - non-integer index will first be changed to integer, discard if cannot change
+            - set an element array to str/int will change all cells in the array to the value
+            - set an element array to another array will change elements in corresponding index to the value
+            - set an element array to a dict using integer as key will set elements in corresponding index to the value
+            - non-integer index will first be changed to integer, discard if cannot change
 
         Raises:
             ValueError: if the value type is none of those listed aboved.
         """
 
-        page_logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, self._locator, value))
-        elements = self._read_cache(instance)
-        if elements is None:
-            elements = self._find_elements(instance, self._locator)
+        instance.logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, self._locator, value))
+        elements = self._find_elements(instance, self._locator)
 
         if type(value) in (list, tuple):
             [self._assign_element(instance, e, v) for (e, v) in zip(elements, value)]
@@ -368,31 +328,37 @@ class PageElements(PageElement):
                     index = int(k)
                     self._assign_element(instance, elements[index], v)
                 except ValueError:
-                    page_logger.debug('Cannot change index to integer, value is disgarded, Key: {}, Value: {}'.format(k, v))
+                    instance.logger.debug(
+                        'Cannot change index to integer, value is disgarded, Key: {}, Value: {}'.format(k, v))
                 except IndexError:
-                    page_logger.debug('Index out of range for PageElements {}, Key: {}, Value: {}'.format(self.name, k, v))
+                    instance.logger.debug(
+                        'Index out of range for PageElements {}, Key: {}, Value: {}'.format(self.name, k, v))
                     continue
         elif type(value) in (int, str):
             [self._assign_element(instance, e, value) for e in elements]
         else:
-            raise ValueError('The value is not supported by PageElement "{}" setting: {}'.format(self.name, str(value)))
+            raise ValueError(
+                'The value is not supported by PageElement "{}" setting: {}'.format(self.name, str(value)))
 
 
 class PageElementTemplate(PageElement):
     """
     Another variation to find element on page. This class provide a parameterized locator to find element dynamically.
-    This class set the locator as a Python format string. Parameters can be passed in at runtime to find element on the fly.
+    This class set the locator as a Python format string. Parameters can be passed in at runtime to find element on
+    the fly.
 
-    Reading this descriptor will return a function which requires paramters to solidify the locator. Calling the function
-    will return the same result following the rule defined in `PageElement`.
+    Reading this descriptor will return a function which requires paramters to solidify the locator. Calling the
+    function will return the same result following the rule defined in `PageElement`.
 
-    This descriptor must be set to a tuple of two with the first one as paramters to the locator and the second one as value.
-    Element will be located by the parameterized locator and then following the rule in `PageElement` to set value to the element.
+    This descriptor must be set to a tuple of two with the first one as paramters to the locator and the second one
+    as value. Element will be located by the parameterized locator and then following the rule in `PageElement` to
+    set value to the element.
     """
 
     def _fetch_element(self, instance, owner, *parameters):
         """
-        The actual function to locate and set an element. This function is wrapped and returned as the result of `PageElementTemplate`.
+        The actual function to locate and set an element. This function is wrapped and returned as the result of
+        `PageElementTemplate`.
 
         Args:
             instance (WebDriver/WebElement): the context of the current element
@@ -400,17 +366,15 @@ class PageElementTemplate(PageElement):
             *paramters: paramters to the locator
         """
 
-        page_logger.debug('Accessing web element "{}": {} with parameter {}'.format(self.name, self._locator, parameters))
+        instance.logger.debug(
+            'Accessing web element "{}": {} with parameter {}'.format(self.name, self._locator, parameters))
         locator = self._locator[0], self._locator[1].format(*parameters)
         try:
-            element = self._read_cache(instance, locator=locator)
-            if element is None:
-                element = self._find_element(instance, locator)
-                self._write_cache(instance, element, locator=locator)
+            element = self._find_element(instance, locator)
             return self._convert_element(instance, element)
         except Exception:
-            page_logger.debug('Cannot find the element')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find the element')
+            instance.logger.debug(traceback.format_exc())
             return None
 
     def __set__(self, instance, value):
@@ -419,15 +383,13 @@ class PageElementTemplate(PageElement):
 
         Args:
             instance (WebDriver/WebElement): The context of the current element.
-            value (tupe of two): Paramters to locator and value to be set. The first element is the locator and the second is the value.
+            value (tupe of two): Paramters to locator and value to be set. The first element is the locator and the
+                second is the value.
         """
         loc_para = (value[0], ) if type(value[0]) is str else value[0]
         locator = self._locator[0], self._locator[1].format(*loc_para)
-        page_logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, locator, value))
-        element = self._read_cache(instance, locator=locator)
-        if element is None:
-            element = self._find_element(instance, locator)
-            self._write_cache(instance, element, locator=locator)
+        instance.logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, locator, value))
+        element = self._find_element(instance, locator)
         self._assign_element(instance, element, value[1])
 
     def __get__(self, instance, owner):
@@ -439,10 +401,11 @@ class PageElementTemplate(PageElement):
 
 class PageElementsTemplate(PageElement):
     """
-    A combination of `PageElements` ant `PageElementTemplate`. This descriptor can find elements in batch using a template.
+    A combination of `PageElements` ant `PageElementTemplate`. This descriptor can find elements in batch using
+    a template.
 
-    Similar to `PageElementTemplate`, the getter of this descriptor will return a function taking paramaters to solidify
-    locator. Difference is , the function will return an array of elements, just like `PageElements`.
+    Similar to `PageElementTemplate`, the getter of this descriptor will return a function taking paramaters to
+    solidify locator. Difference is , the function will return an array of elements, just like `PageElements`.
 
     Setting this descriptor is also similar to the setter of `PageElementTemplate`. A pair of key and value should be
     used as the right value of the assignment. The first element of the pair is the paramter to construct the locator
@@ -451,7 +414,8 @@ class PageElementsTemplate(PageElement):
 
     def _fetch_element(self, instance, owner, *parameters):
         """
-        The actual function to locate and set elements. This function is wrapped and returned as the result of `PageElementTemplate`.
+        The actual function to locate and set elements. This function is wrapped and returned as the result of
+        `PageElementTemplate`.
 
         Args:
             instance (WebDriver/WebElement): the context of the current element
@@ -459,17 +423,15 @@ class PageElementsTemplate(PageElement):
             *paramters: paramters to the locator
         """
 
-        page_logger.debug('Accessing web element "{}": {} with parameter {}'.format(self.name, self._locator, parameters))
+        instance.logger.debug(
+            'Accessing web element "{}": {} with parameter {}'.format(self.name, self._locator, parameters))
         locator = self._locator[0], self._locator[1].format(*parameters)
         try:
-            elements = self._read_cache(instance, locator=locator)
-            if elements is None:
-                elements = self._find_elements(instance, locator)
-                self._write_cache(instance, elements, locator=locator)
+            elements = self._find_elements(instance, locator)
             return [self._convert_element(instance, e) for e in elements]
         except Exception:
-            page_logger.debug('Cannot find the element')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find the element')
+            instance.logger.debug(traceback.format_exc())
             return []
 
     def __set__(self, instance, value):
@@ -478,18 +440,16 @@ class PageElementsTemplate(PageElement):
 
         Args:
             instance (WebDriver/WebElement): The context of the current element.
-            value (tupe of two): Paramters to locator and value to be set. The first element is the locator and the second is the value.
+            value (tupe of two): Paramters to locator and value to be set. The first element is the locator and the
+                second is the value.
         """
         # build the locator
         loc_para = (value[0], ) if type(value[0]) is str else value[0]
         locator = self._locator[0], self._locator[1].format(*loc_para)
 
         # find all elements by the locator
-        page_logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, locator, value))
-        elements = self._read_cache(instance, locator=locator)
-        if elements is None:
-            elements = self._find_elements(instance, locator)
-            self._write_cache(instance, elements, locator=locator)
+        instance.logger.debug('Setting web element: "{}": {} to  {}'.format(self.name, locator, value))
+        elements = self._find_elements(instance, locator)
 
         # set values to elements
         if type(value[1]) in (list, tuple):
@@ -503,11 +463,13 @@ class PageElementsTemplate(PageElement):
                     self._assign_element(instance, elements[index], v)
                 except ValueError:
                     # index is not an integer, log error and skip
-                    page_logger.debug('Cannot change index to integer, value is disgarded, Key: {}, Value: {}'.format(k, v))
+                    instance.logger.debug(
+                        'Cannot change index to integer, value is disgarded, Key: {}, Value: {}'.format(k, v))
                     continue
                 except IndexError:
                     # index out of range, log error and skip
-                    page_logger.debug('Index out of range for PageElements {}, Key: {}, Value: {}'.format(self.name, k, v))
+                    instance.logger.debug(
+                        'Index out of range for PageElements {}, Key: {}, Value: {}'.format(self.name, k, v))
                     continue
         elif type(value[1]) in (int, str):
             # set an entire array of elements to a single value
@@ -528,25 +490,29 @@ class PageElementDict(PageElement):
     A dictionary of elements on the page.
 
     This class organize elements on the page into a dictionary by defining how to find items, keys and values.
-    The concept is to locate the whole container element of the dictionary first, then, in the context of the container,
-    locate dictionary items. In the context of each item, it will locate key and value respectively and build a dictionary
-    by located elements.
+    The concept is to locate the whole container element of the dictionary first, then, in the context of the
+    container, locate dictionary items. In the context of each item, it will locate key and value respectively
+    and build a dictionary by located elements.
 
-    When getting the descriptor, it will return a real dictionary containing all elements found thus all dictionary operations are valid.
-    If multiple elements can be matched with the `value_loc`, all of them will be fetched and saved in an array. If only one value is
-    found, it will be returned. If either key or value cannot be located in an item, the item will be ignored silently.
+    When getting the descriptor, it will return a real dictionary containing all elements found thus all dictionary
+    operations are valid. If multiple elements can be matched with the `value_loc`, all of them will be fetched and
+    saved in an array. If only one value is found, it will be returned. If either key or value cannot be located in
+    an item, the item will be ignored silently.
 
-    Trying to use [] syntax to set element will only change the dictionary builtv when locating elements. The actual page will not be affected.
-    The descriptor can only be set to a dictionary with keys as element keys to be changed and value as the value to be set.
+    Trying to use [] syntax to set element will only change the dictionary returned when locating elements. The actual
+    page will not be affected. The descriptor can only be set to a dictionary with keys as element keys to be changed
+    and value as the value to be set.
 
-    `PageElementDict` inherits from `PageElement` thus getting and setting elements follows the same rule in `PageElement`. All
-    configurations defined in __init__ of `PageElement` apply to dictionary value. Keys are read using standard rule, or, if key_hook is defined,
-    apply key_hook to the key elmenet to find the key. Parameters item_by, key_by, value_by are optional which will default to `loc`.
+    `PageElementDict` inherits from `PageElement` thus getting and setting elements follows the same rule in
+    `PageElement`. All configurations defined in __init__ of `PageElement` apply to dictionary value. Keys are
+    read using standard rule, or, if key_hook is defined, apply key_hook to the key elmenet to find the key.
+    Parameters item_by, key_by, value_by are optional which will default to `loc`.
 
     """
 
     def __init__(self, loc, item_loc, key_loc, value_loc, by=None, item_by=None, key_by=None, value_by=None,
-                 component=None, value_only=False, ignore_visibility=False, timeout=0, read_hook=None, write_hook=None, key_hook=None, enable_cache=False):
+                component=None, value_only=False, ignore_visibility=False, timeout=0,
+                read_hook=None, write_hook=None, key_hook=None):
         """
         Initialize `PageElementDict` descriptor. It inherits `PageElement`.
 
@@ -555,14 +521,17 @@ class PageElementDict(PageElement):
             item_loc (str): the locator of a single item relative to the dictionary
             key_loc (str): the locator of the key relative to the item
             value_loc (str): the locator of the value relative to the item
-            by (str, optional): type of the locator of the dictionary. Defaults to None which will use the `default_by` in `pageconfig`.
+            by (str, optional): type of the locator of the dictionary. Defaults to None which will use the `default_by`
+                in `pageconfig`.
             item_by (str, optional): type of the locator of the item. Defaults to None which will use the value of `by`.
             key_by (str, optional): type of the locator of the key. Defaults to None which will use the value of `by`.
-            value_by (str, optional): type of the locator of the value. Defaults to None which will use the value of `by`.
+            value_by (str, optional): type of the locator of the value. Defaults to None which will use the
+                value of `by`.
             key_hook (callable, optional): the hook applied to the key. Defaults to None.
             component (Sub-class of `PageComponent`, optional): The component of the current DOM. Defaults to None.
-                If a DOM element is a wrapper of a functional component, the component can be defined by another class inherited from `PageComponent`.
-                Apart from locating the element, it is also casted as the component object.
+                If a DOM element is a wrapper of a functional component, the component can be defined by another class
+                inherited from `PageComponent`. Apart from locating the element, it is also casted as the component
+                object.
             value_only (bool, optional): The descriptor returns the element value if True. Defaults to False.
                 The element value is defined as following:
                 - <checkbox>/<radio>: is_selected()
@@ -570,11 +539,14 @@ class PageElementDict(PageElement):
                 - all the other tags: "textContent" attribute
                 This field has no effect if "component" is set
             ignore_visibility (bool, optional): Defaults to False.
-                If set to True, ignores visibility of the element and tries to operate on it, otherwise it will throw NoSuchElementException exception.
-            timeout (int, optional): seconds to wait for the described element to be visible. Defaults to 0 which means no waiting.
+                If set to True, ignores visibility of the element and tries to operate on it, otherwise it will throw
+                NoSuchElementException exception.
+            timeout (int, optional): seconds to wait for the described element to be visible. Defaults to 0 which means
+                no waiting.
             read_hook (callable, optional): a function to process the return of the descriptor. Defaults to None.
                 The function must take two arguments (driver, element) and returns a value
-            write_hook (callable, optional): a function to handle what happens when writing to an element. Defaults to None.
+            write_hook (callable, optional): a function to handle what happens when writing to an element.
+                Defaults to None.
                 The function must take three arguments (driver, element, value)
         """
         super().__init__(loc, by, component, value_only, ignore_visibility, timeout, read_hook, write_hook)
@@ -595,7 +567,7 @@ class PageElementDict(PageElement):
 
     @property
     def key_loc(self):
-        return self._loc(self._key_by , self._key_loc)
+        return self._loc(self._key_by, self._key_loc)
 
     @property
     def value_loc(self):
@@ -603,22 +575,24 @@ class PageElementDict(PageElement):
 
     def _get_items(self, instance):
         """
-        Find all items in the dictionary and return them as an array. Item are not separated into key and values at this point.
+        Find all items in the dictionary and return them as an array. Item are not separated into key and values
+        at this point.
 
         Args:
             instance (WebDriver/WebElemet): the context of the current element
 
         Returns:
-            list: a list of elements representing items in the array. An empty array will be returned if no element found
+            list: a list of elements representing items in the array. An empty array will be returned
+                if no element found
         """
         try:
-            page_logger.debug('Fetching dict container: {}'.format(self._locator))
+            instance.logger.debug('Fetching dict container: {}'.format(self._locator))
             dict_container = self._find_element(instance, self._locator)
-            page_logger.debug('Fetching dict items: {}'.format(self.item_loc))
-            items = self._find(dict_container, self, self.item_loc, dict_container.find_elements)
+            instance.logger.debug('Fetching dict items: {}'.format(self.item_loc))
+            items = self._find(instance.page.context, instance, self.item_loc, dict_container.find_elements)
         except Exception:
-            page_logger.debug('Cannot find element container/items')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find element container/items')
+            instance.logger.debug(traceback.format_exc())
             items = []
         finally:
             return items
@@ -636,20 +610,19 @@ class PageElementDict(PageElement):
             Return None if key cannot be located
         """
         try:
-            page_logger.debug('Fetching item key: {}'.format(self.key_loc))
-            element = self._find(item, instance, self.key_loc, item.find_element)
+            element = self._find(instance.page.context, instance, self.key_loc, item.find_element)
             key = self.key_hook(instance, element) if self.key_hook else self._get_element(element)
-            page_logger.debug('Got key {}'.format(key))
         except Exception:
-            page_logger.debug('Cannot find element key')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find element key')
+            instance.logger.debug(traceback.format_exc())
             key = None
         finally:
             return key
 
     def _get_value(self, instance, item):
         """
-        Find values in an element. If multiple values are matched, all of them are saved in an array in the order of appearence in the DOM.
+        Find values in an element. If multiple values are matched, all of them are saved in an array in the order of
+            appearence in the DOM.
 
         Args:
             instance (WebDriver/WebElemet): the context of the current element
@@ -660,14 +633,12 @@ class PageElementDict(PageElement):
             Return ([], None) if value cannot be located
         """
         try:
-            page_logger.debug('Fetching item value: {}'.format(self.value_loc))
-            ves = self._find(item, instance, self.value_loc, item.find_elements)
+            ves = self._find(instance.page.context, instance, self.value_loc, item.find_elements)
             value = [self._convert_element(instance, ve) for ve in ves]
             value = None if not value else (value[0] if len(value) == 1 else value)
-            page_logger.debug('Got value {}'.format(value))
         except Exception:
-            page_logger.debug('Cannot find the element value')
-            page_logger.debug(traceback.format_exc())
+            instance.logger.debug('Cannot find the element value')
+            instance.logger.debug(traceback.format_exc())
             ves = []
             value = None
         finally:
@@ -675,74 +646,45 @@ class PageElementDict(PageElement):
 
     def _set_value(self, instance, item, values):
         """
-        Set value to an item in the dictionary. The value can be a list/tuple or a single value. If an array is provided, it will be
-        zipped to each matching value element and set. If a single value is provided, it will be set to the first matching value element.
+        Set value to an item in the dictionary. The value can be a list/tuple or a single value. If an array is
+        provided, it will be zipped to each matching value element and set. If a single value is provided, it will
+        be set to the first matching value element.
 
         Args:
             instance (WebDriver/WebElemet): the context of the current element
             item (WebElement): the element represents the current item
             values: value(s) to be set to the element
         """
-        page_logger.debug('Setting item value: {}'.format(self.value_loc))
-        ves = self._find(item, instance, self.value_loc, item.find_elements)
+        instance.logger.debug('Setting item value: {}'.format(self.value_loc))
+        ves = self._find(instance.page.context, instance, self.value_loc, item.find_elements)
         target = values if len(ves) > 1 else [values]
         [self._assign_element(instance, atom, atom_value) for (atom, atom_value) in zip(ves, target)]
-
-    def _get_cached_elements(self, instance, elements):
-        """Experiment feature. Fetch element from cache."""
-        result = {}
-        for key, es in elements.items():
-            value = [self._convert_element(instance, e) for e in es]
-            value = value[0] if len(value) == 1 else value
-            result[key] = value
-        return result
-
-    def _set_cached_elements(self, instance, elements, value):
-        """Experiment feature. Save element to cache."""
-        # set values of the cached dict
-        # as the dict and keys are already stored, it only iterate over all values and set the cached elements accordingly
-        # mismatched values are dropped silently
-        for k, v in value.items():
-            if k not in elements:
-                continue
-            if len(elements[k]) == 1:
-                v = [v]
-            [self._assign_element(instance, item, value) for (item, value) in zip(elements[k], v)]
-        self._write_cache(instance, elements)
-        return
 
     def __get__(self, instance, owner):
         """
         Fetch dictionary of elements. It will return a dictionary of element key and values.
 
-        An empty dictionary will be returned if dictionary container cannot be located or items in the container cannot be located.
+        An empty dictionary will be returned if dictionary container cannot be located or items in the container
+        cannot be located.
         """
-        page_logger.debug('Accessing web elements: "{}": {}'.format(self.name, self._locator))
-        page_logger.debug('Trying to build dict with item: {}, key: {}, value: {}'.format(self.item_loc, self.key_loc, self.value_loc))
+        instance.logger.debug('Accessing web elements: "{}": {}'.format(self.name, self._locator))
+        instance.logger.debug(
+            'Trying to build dict with item: {}, key: {}, value: {}'
+            .format(self.item_loc, self.key_loc, self.value_loc))
 
-        # try to get dict from cache
-        cached = self._read_cache(instance)
-        if cached is not None:
-            return self._get_cached_elements(instance, cached)
-
-        # cached missed, find elements on the page
         result = {}
-        elements = {}
         items = self._get_items(instance)
-        page_logger.debug('Found {} items'.format(len(items)))
+        instance.logger.debug('Found {} items'.format(len(items)))
         for i in items:
             key = self._get_key(instance, i)
             if key is None:
                 continue
-            ves, value = self._get_value(instance, i)
+            _, value = self._get_value(instance, i)
             if value is None:
                 continue
             result[key] = value
-            elements[key] = ves
-            page_logger.debug('{} => {}'.format(key, value))
+            instance.logger.debug('{} => {}'.format(key, value))
 
-        # update cache with newest elements
-        self._write_cache(instance, elements)
         return result
 
     def __set__(self, instance, value):
@@ -751,30 +693,25 @@ class PageElementDict(PageElement):
 
         Values to be set must be a dictionary with keys matchting `PageElementDict` keys and values to be set.
         """
-        page_logger.debug('Setting web elements: "{}": {} to  {}'.format(self.name, self._locator, value))
-        page_logger.debug('Trying to set dict with item: {}, key: {}, value: {}'.format(self.item_loc, self.key_loc, self.value_loc))
+        clone_values = dict(value)
+        instance.logger.debug('Setting web elements: "{}": {} to  {}'.format(self.name, self._locator, value))
+        instance.logger.debug(
+            'Trying to set dict with item: {}, key: {}, value: {}'
+            .format(self.item_loc, self.key_loc, self.value_loc))
 
-        # try to use cached elements first
-        elements = self._read_cache(instance)
-        if elements is not None:
-            self._set_cached_elements(instance, elements, value)
-            return
-
-        # cache missed, find elements on the page and set. "elements" is the dict to be stored in cache
-        elements = {}
+        # find elements on the page
         items = self._get_items(instance)
-        page_logger.debug('Found {} items'.format(len(items)))
+        instance.logger.debug('Found {} items'.format(len(items)))
         for i in items:
+            if not clone_values:
+                break
             key = self._get_key(instance, i)
-            ves = self._get_value(instance, i)
-            elements[key] = ves
-            if key is None or key not in value:
+            if key is None or key not in clone_values:
                 continue
-            self._set_value(instance, i, value[key])
-            page_logger.debug('Key matching, set element {} to {}'.format(key, value[key]))
-
-        # update cache with newest result
-        self._write_cache(instance, elements)
+            else:
+                v = clone_values.pop(key)
+            self._set_value(instance, i, v)
+            instance.logger.debug('Key matching, set element {} to {}'.format(key, value[key]))
 
 
 class PageBase(WaitMixin):
@@ -788,8 +725,9 @@ class PageBase(WaitMixin):
         Initialize a `PageBase`.
 
         Args:
-            context (PageBase): the parent context of the current object.
-            page (WebDriver): the web drver driving the browser
+            context (WebDriver or WebElement): the raw driver or element of the page/component
+            page (PageObject): the page object of the page/component. it is `self` for page and the containing page for
+                components
         """
         self.context = context
         self.page = page
@@ -803,7 +741,8 @@ class PageBase(WaitMixin):
             name (str): name of the attribute requested
 
         Raises:
-            AttributeError: in case that attribute cannot be found locally as well as in the wrapped WebDriver/WebElement
+            AttributeError: in case that attribute cannot be found locally as well as in the wrapped
+                WebDriver/WebElement
 
         Returns:
             The value of the attribute.
@@ -814,15 +753,20 @@ class PageBase(WaitMixin):
             raise AttributeError('Cannot find attribute {} in {}'.format(name, self.__class__.__name__))
         return element
 
-    def hover(self, element):
+    def hover(self, element, offset=None):
         """
         Wrapper of ActionChain to hover over an element.
 
         Args:
-            element (WebElement): the elment to be hovered over. It can be a web element descriptor that returns a WebElement or PageComponent
+            element (WebElement): the elment to be hovered over. It can be a web element descriptor that returns a
+                WebElement or PageComponent
         """
+        element = element.context if isinstance(element, PageComponent) else element
         ac = ActionChains(self.page)
-        ac.move_to_element(element).perform()
+        if not offset:
+            ac.move_to_element(element).perform()
+        else:
+            ac.move_to_element_with_offset(element, offset[0], offset[1]).perform()
 
     def press_key(self, keys):
         """
@@ -839,10 +783,24 @@ class PageBase(WaitMixin):
         Wrapper to double click an element
 
         Args:
-            element (WebElement): the element to be double clicked. It can be a web element descriptor that returns a WebElement or PageComponent
+            element (WebElement): the element to be double clicked. It can be a web element descriptor that returns a
+                WebElement or PageComponent
         """
+        element = element.context if isinstance(element, PageComponent) else element
         ac = ActionChains(self.page)
         ac.double_click(element).perform()
+
+    def right_click(self, element):
+        """
+        Wrapper to right click an element
+
+        Args:
+            element (WebElement): the element to be right clicked. It can be a web element descriptor that returns a
+                WebElement or PageComponent
+        """
+        element = element.context if isinstance(element, PageComponent) else element
+        ac = ActionChains(self.page)
+        ac.context_click(element).perform()
 
     def drag_drop(self, element, target):
         """
@@ -852,6 +810,8 @@ class PageBase(WaitMixin):
             element (WebElement): the element to be dragged
             target (WebElement): the destination element to be dragged to
         """
+        element = element.context if isinstance(element, PageComponent) else element
+        target = target.context if isinstance(target, PageComponent) else target
         ac = ActionChains(self.page)
         ac.drag_and_drop(element, target).perform()
 
@@ -862,6 +822,7 @@ class PageBase(WaitMixin):
         Args:
             element (webelement): The element to be scrolled into view
         """
+        element = element.context if isinstance(element, PageComponent) else element
         ac = ActionChains(self.page)
         ac.move_to_element(element).perform()
 
@@ -871,18 +832,18 @@ class PageBase(WaitMixin):
 
         The standard WebElement.clear() does not fire onChange in React. It's not an exact equivalant behaviour of human
         action. Plus, I found that different versions of Chrome respond to the call differently, specifically, in Chrome
-        78.0.3904.97 the call is not respected at all, while in docker image selenium/node-chrome:3.14.0-dubnium the call
-        is processed reliably.
+        78.0.3904.97 the call is not respected at all, while in docker image selenium/node-chrome:3.14.0-dubnium the
+        call is processed reliably.
 
         See discussions here for detail:
             https://github.com/SeleniumHQ/selenium/issues/6741
-            https://bugs.chromium.org/p/chromedriver/issues/detail?id=2702&q=&sort=-id&colspec=ID%20Status%20Pri%20Owner%20Summary
         Selenium team won't "fix" this issue, neither will Chromium project. So as a workaround, this method mimic human
         action step by step using ActionChain to ensure that the field is cleared properly.
 
         Args:
             element (WebDriver): the text input element to be cleared.
         """
+        element = element.context if isinstance(element, PageComponent) else element
         ac = ActionChains(self.page)
         ac.click(element) \
             .key_down(Keys.CONTROL).send_keys('a').key_up(Keys.CONTROL) \
@@ -892,30 +853,36 @@ class PageBase(WaitMixin):
 
 class PageComponent(PageBase):
     """
-    The container of a group of related WebElement/PageComponent defined by `PageElement` and its variations. This class inherit `PageBase`.
+    The container of a group of related WebElement/PageComponent defined by `PageElement` and its variations.
+    This class inherit `PageBase`.
 
-    How to group elements is up to the user but the practice is to group by functionality. E.g. search box and the button, a label and its input box, etc.
+    How to group elements is up to the user but the practice is to group by functionality. E.g. search box and
+    the button, a label and its input box, etc.
     """
     def __init__(self, element, page):
         super(PageComponent, self).__init__(element, page)
+        self.logger = self.page.logger
 
 
 class PageObject(PageBase):
     """
-    The page object of a web page. Elements are defined by using `PageElement` or its variations, potentially, they are grouped into `PageComponent`.
-    This class inherits `PageBase`. It can be decorated by `decorators.pageconfig` to provide more configurations. See the decorator reference
+    The page object of a web page. Elements are defined by using `PageElement` or its variations, potentially,
+    they are grouped into `PageComponent`.
+    This class inherits `PageBase`. It can be decorated by `decorators.pageconfig` to provide more configurations.
+    See the decorator reference
     for details.
     """
 
-    def __init__(self, drv):
+    def __init__(self, drv, logger=None):
         super(PageObject, self).__init__(drv, self)
-        self.cache = PageElementCache(self) if self.enable_cache else None
+        self.logger = logging.getLogger().addHandler(logging.StreamHandler(sys.stdout)) if not logger else logger
 
     def alert(self, timeout=0):
         """
         Wrapper of `WebDriver.switch_to.alert`.
         It can wait for alert to be present before acting on the alert box to prevent unnecessary exceptions.
-        If the alert does not show after the waiting period, it returns None which will fail any further action to the alert box.
+        If the alert does not show after the waiting period, it returns None which will fail any further action
+        to the alert box.
 
         Args:
             timeout (int, optional): time to wait before alert presents. Defaults to 0 which means no waiting period.
@@ -923,7 +890,7 @@ class PageObject(PageBase):
         Returns:
             The alert box displayed. Return None is timeout.
         """
-        page_logger.debug('Switching to alert.')
+        self.logger.debug('Switching to alert.')
         try:
             self.wait(EC.alert_is_present(), timeout or self.timeout)
         except TimeoutException:
@@ -943,7 +910,7 @@ class PageObject(PageBase):
             The new window to be switched to.
         """
         script = 'return document.readyState == "complete"'
-        page_logger.debug('Switching to window[{}].'.format(window))
+        self.logger.debug('Switching to window[{}].'.format(window))
         if type(window) is int:
             window = self.context.window_handles[window]
         self.context.switch_to.window(window)
@@ -956,7 +923,7 @@ class PageObject(PageBase):
         Args:
             frame (str): frame name.
         """
-        page_logger.debug('Switching to Frame[{}]'.format(frame))
+        self.logger.debug('Switching to Frame[{}]'.format(frame))
         self.context.switch_to.frame(frame)
 
     def goto(self, next_page, window=None, frame=None, timeout=0):
@@ -964,7 +931,8 @@ class PageObject(PageBase):
         Cast the page or a page in window/frame to `PageObject` of the class specified by `next_page`
 
         Args:
-            next_page (str): the class of the next page. It is provided by a string specifying the absolute path to the clas
+            next_page (str): the class of the next page. It is provided by a string specifying the absolute
+                path to the clas
             window (str, optional): window handler. Defaults to None, must present if go to window or frame.
             frame (str, optional): frame name. Defaults to None, must present if go to frame.
             timeout (int, optional): timeout value for the page to load. Defaults to 0.
@@ -980,11 +948,15 @@ class PageObject(PageBase):
 
     def resize(self, width=None, height=None):
         """
-        Resize the window to the specified width and height. This method is useful when capturing screenshot in headless browser
-        Note: it only works in headless Chrome at the moment. The viewport size will be limited to screen resolution if used in GUI mode
+        Resize the window to the specified width and height. This method is useful when capturing screenshot in
+        headless browser
+        Note: it only works in headless Chrome at the moment. The viewport size will be limited to screen resolution
+        if used in GUI mode
 
-        The resize uses Javascript to change viewport width/heigh. Both width and height must be valid Javascript that returns a number.
-        The returned number is used as width/height. If width or height is not given, it will use scrollHeight/scrollWidth as width/height
+        The resize uses Javascript to change viewport width/heigh. Both width and height must be valid Javascript
+        that returns a number.
+        The returned number is used as width/height. If width or height is not given, it will use
+        scrollHeight/scrollWidth as width/height
         to provide the maximam viewport without scrolling.
 
         Args:
@@ -1008,23 +980,23 @@ class PageObject(PageBase):
         self.resize()
         self.save_screenshot(fname)
 
-    @staticmethod
-    def changepage(next_page, drv):
+    def changepage(self, next_page, drv):
         """
         Cast the current page to the specified class.
 
         Args:
-            next_page (str): the class of the next page. It is provided by a string specifying the absolute path to the clas
+            next_page (str): the class of the next page. It is provided by a string specifying the absolute path
+                to the clas
             drv (WebDriver): the web driver object that drives the browser
 
         Returns:
             PageObject: new `PageObject` of the specified class
         """
-        page_logger.debug('Changing page to <{}>'.format(next_page))
+        self.logger.debug('Changing page to <{}>'.format(next_page))
         path, cls = next_page.rsplit('.', 1)
         m = import_module(path)
         cls = getattr(m, cls)
-        return cls(drv)
+        return cls(drv, self.logger)
 
 
 class PageTable(PageComponent):
@@ -1069,16 +1041,7 @@ class PageTable(PageComponent):
 
     def _all_rows(self):
         """Fetch all rows in the table in a list"""
-        if self.page.cache is not None:
-            context_id, locator = self.context._id, self._row_locator
-            context_hash = self.get_attribute('outerHTML')
-            elements = self.page.cache.read(context_id, context_hash, locator)
-        else:
-            elements = []
-        if not elements:
-            elements = self.context.find_elements(*self._row_locator)
-            if self.page.cache is not None:
-                self.page.cache.write(context_id, context_hash, locator, elements)
+        elements = self.context.find_elements(*self._row_locator)
         return elements
 
     def _expand_conditions(self, conditions):
@@ -1096,12 +1059,12 @@ class PageTable(PageComponent):
             if not callable(v):
                 def cond(x, ref=v):
                     t = x.get_attribute('textContent').strip() if isinstance(x, WebElement) else x
-                    page_logger.debug('value[{}] == expected[{}]? => {}'.format(t, ref, t == ref))
+                    self.page.logger.debug('value[{}] == expected[{}]? => {}'.format(t, ref, t == ref))
                     return t == ref
             else:
                 def cond(x, c=v):
                     result = c(x)
-                    page_logger.debug('value[{}] matching <lambda function>? => {}'.format(x, result))
+                    self.page.logger.debug('value[{}] matching <lambda function>? => {}'.format(x, result))
                     return result
             expanded[k] = cond
             # expanded[k] = lambda x, ref=v: \
@@ -1120,27 +1083,27 @@ class PageTable(PageComponent):
             if no rows are found. If `once` is set to True, the row object matching conditions is returned, return None
             if no row matches the condition.
         """
-        page_logger.debug('Querying table with conditions: {}...'.format(str(conditions)))
+        self.page.logger.debug('Querying table with conditions: {}...'.format(str(conditions)))
         rows = self._all_rows()
         result = []
 
         conditions = self._expand_conditions(conditions)
 
         for i, row in enumerate(rows):
-            page_logger.debug('Checking row {}...'.format(i))
+            self.page.logger.debug('Checking row {}...'.format(i))
 
             if self._row_component:
                 row = self._row_component(row, self.page)
 
             if not conditions or all(cond(getattr(row, attr)) for (attr, cond) in conditions.items()):
-                page_logger.debug('Found matching row: {}'.format(i))
+                self.page.logger.debug('Found matching row: {}'.format(i))
                 result.append(row)
 
             if result and once:
-                page_logger.debug('Terminating immediately after found.')
+                self.page.logger.debug('Terminating immediately after found.')
                 return result[0]
 
-        page_logger.debug('Found {} row(s)'.format(len(result)))
+        self.page.logger.debug('Found {} row(s)'.format(len(result)))
         return None if once and not result else result
 
     def apply(self, action, once=False, **conditions):
@@ -1148,27 +1111,28 @@ class PageTable(PageComponent):
         Similar to query, this method apply an action to matching rows in the table.
 
         Args:
-            action (callable): the action to be applied to the row. It takes a single parameter representing the row object
+            action (callable): the action to be applied to the row. It takes a single parameter representing the row
+                object
             once (bool, optional): If True, terminate at the first match. Defaults to False.
         """
-        page_logger.debug('Applying operation to table with conditions: {}...'.format(str(conditions)))
+        self.page.logger.debug('Applying operation to table with conditions: {}...'.format(str(conditions)))
         rows = self._all_rows()
         result = []
 
         conditions = self._expand_conditions(conditions)
 
         for i, row in enumerate(rows):
-            page_logger.debug('Checking row {}...'.format(i))
+            self.page.logger.debug('Checking row {}...'.format(i))
 
             if self._row_component:
                 row = self._row_component(row, self.page)
 
             if not conditions or all(cond(getattr(row, attr)) for (attr, cond) in conditions.items()):
-                page_logger.debug('Found matching row: {}'.format(i))
+                self.page.logger.debug('Found matching row: {}'.format(i))
                 action(row)
 
             if result and once:
-                page_logger.debug('Terminating immediately after found.')
+                self.page.logger.debug('Terminating immediately after found.')
                 break
 
     def column(self, column_ident, component=None):

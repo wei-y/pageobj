@@ -1,8 +1,4 @@
-import logging
 from .pageobject import PageElement, PageObject, PageComponent
-
-
-page_logger = logging.getLogger('PageObject')
 
 
 def nextpage(name):
@@ -11,13 +7,13 @@ def nextpage(name):
 
     Args:
         name: the full package path to the class name of the next page. It can be a string, a dict or a callable.
-            1) When it is a string, it is the full package path of the class name of the expected next page. In this case,
-            the method being decorated must return None.
-            2) When it is a dict, the key in the dict is the short token of next page and the value is teh package path to
-            the class name of next page. The method being decorated must return one of the token to get to the page. This
-            option provides a dynamic next page ability
-            3) When it is a callable, it takes the return value of the decorated and returns the full package name to the
-            class of next page. The method being decorated can return anything accepteble to the `name` parameter.
+            1) When it is a string, it is the full package path of the class name of the expected next page.
+            In this case, the method being decorated must return None.
+            2) When it is a dict, the key in the dict is the short token of next page and the value is teh package
+            path to the class name of next page. The method being decorated must return one of the token to get to
+            the page. This option provides a dynamic next page ability
+            3) When it is a callable, it takes the return value of the decorated and returns the full package name to
+            the class of next page. The method being decorated can return anything accepteble to the `name` parameter.
 
     Raises:
         RuntimeError: When type of name is not string, dict or callable
@@ -27,59 +23,66 @@ def nextpage(name):
     Returns:
         The wrapper to change the page class.
     """
-    def wrapper(f):
+    def wrapper(action):
+        # action is the function defined in page object to be called and decorated
+        # at the moment when it is decorated, it is a unbound method
+        # it is called wrapped in the following `change_page` with the first argument set to `instance` representing
+        # the item binding to the method
         def change_page(instance, *args, **kargs):
-            r = f(instance, *args, **kargs)
+            # token is returned from the function and it is used to select which page to change to
+            token = action(instance, *args, **kargs)
 
             if type(name) is str:
+                # only one possible target page is defined, use it and ignore the returned token
                 page_name = name
             elif type(name) is dict:
+                # target pages are defined in a dict, use token as key
                 default = name.get('__default__')
-                page_name = name.get(r, default)
+                page_name = name.get(token, default)
             elif callable(name):
-                page_name = name(r)
+                # target pages are defined as callable, use toke as input to the callable and return value as target
+                page_name = name(token)
             else:
-                raise RuntimeError('Parameter type to nextpage() must be string/dict/fuction.')
+                msg = f'Parameter type to nextpage() must be string/dict/fuction. Value: {name}, Type: {type(name)}'
+                raise RuntimeError(msg)
 
             if type(page_name) is not str:
-                raise RuntimeError('Next page class must be a string, got: {} of type {}'.format(page_name, type(page_name)))
+                raise RuntimeError(
+                    'Next page class must be a string, got: {} of type {}'.format(page_name, type(page_name)))
 
-            if isinstance(instance, PageObject):
-                drv = instance.context
-            elif isinstance(instance, PageComponent):
-                drv = instance.page.context
-            else:
+            if not (isinstance(instance, PageObject) or isinstance(instance, PageComponent)):
                 raise TypeError('Instance is not PageObject or PageComponent')
 
-            p = PageObject.changepage(page_name, drv)
+            # create a new page object using the target page object class and webdriver
+            p = instance.page.changepage(page_name, instance.page.context)
 
+            # call the on_enter() hook when changed to a new page
             if hasattr(p, 'on_enter'):
-                page_logger.debug('Running entering hook of {}'.format(page_name))
+                p.logger.debug('Running entering hook of {}'.format(page_name))
                 p.on_enter()
             return p
         return change_page
     return wrapper
 
 
-def pageconfig(default_by=None, timeout=0, enable_cache=False):
+def pageconfig(default_by=None, timeout=0):
     """
     Setup `PageObject` with default attributes
 
     Args:
         default_by (str, optional): the default type of locators in this page. Defaults to None.
         timeout (int, optional): the default value of timeout when waiting. Defaults to 0.
-        enable_cache (bool, optional): experiment feature to cache elements on the page. Defaults to False.
 
     Returns:
         The wrapper to inject attributes to class definition
     """
     def wrapper(c):
+        # inject attributes to the class decorated
         for attr in c.__dict__.values():
             if isinstance(attr, PageElement) and default_by and not attr.by:
                 attr.by = default_by
         if timeout:
             c._timeout = timeout
-        c.enable_cache = enable_cache
         return c
     return wrapper
 
