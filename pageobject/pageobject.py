@@ -998,6 +998,27 @@ class PageObject(PageBase):
         cls = getattr(m, cls)
         return cls(drv, self.logger)
 
+    def scroll_to_end(self, monitor_url):
+        """
+        Scroll page to end to load dynamic content until no more
+
+        Args:
+            monitor_url (str): the URL to be monitored for page loading
+        """
+        self.logger.debug('Scrolling to page end to load more content')
+        body_height = 'return document.body.scrollHeight'
+        last_height = self.execute_script(body_height)
+
+        while True:
+            # Scroll down to the bottom.
+            with self.wait_http_request_after(monitor_url, timeout=1, ignore_timeout=True):
+                self.execute_script(f"window.scrollTo(0, {last_height});")
+            # Calculate new scroll height and compare with last scroll height.
+            new_height = self.execute_script(body_height)
+            if new_height == last_height:
+                break
+            last_height = new_height
+
 
 class PageTable(PageComponent):
     """
